@@ -54,25 +54,23 @@ let leader =
     "succesful append response commits log entry" >:: test (fun state ->
         let raft = init 0 Leader [0;1] test_state in
         let (_, _, raft) = handle_command raft 18 in
-        let _ = handle_rpc raft (response AppendSuccess) in
+        let _ = handle_rpc raft (response (AppendSuccess 1)) in
         assert_equal ~printer:print_state [18] !state
       );
 
     "commit index is incremented after commit" >:: test (fun _ ->
         let raft = init 0 Leader [0;1] test_state in
         let (_, _, raft) = handle_command raft 18 in
-        let (_, raft) = handle_rpc raft (response AppendSuccess) in
+        let (_, raft) = handle_rpc raft (response (AppendSuccess 1)) in
         let (io, _) = handle_timeout raft in
         assert_equal ~printer:print_io [Rpc (1, append ~prev_idx:1 ~commit:1 [])] io
       );
 
-    "heartbeat doesn't increase commit index" >:: test (fun _ ->
+    "client response is sent after commit" >:: test (fun _ ->
         let raft = init 0 Leader [0;1] test_state in
-        let (_, raft) = handle_timeout raft in
-        let (_, raft) = handle_rpc raft (response AppendSuccess) in
-        let (io, _) = handle_timeout raft in
-        let expected = append [] in
-        assert_equal ~printer:print_io [Rpc (1, expected)] io
+        let (index, _, raft) = handle_command raft 18 in
+        let (io, _) = handle_rpc raft (response (AppendSuccess 1)) in
+        assert_equal ~printer:print_io [Response (index, 18)] io
       );
   ]
 
@@ -83,7 +81,7 @@ let follower =
         let raft = init 1 Follower [0;1] test_state in
         let rpc = append [{ index = 1; term = 0; command = 17 }] in
         let (io, _) = handle_rpc raft rpc in
-        assert_equal ~printer:print_io [Rpc (0, response AppendSuccess)] io
+        assert_equal ~printer:print_io [Rpc (0, response (AppendSuccess 1))] io
       );
 
     "leader commit commits log" >:: test (fun state ->

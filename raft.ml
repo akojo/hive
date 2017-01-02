@@ -51,7 +51,7 @@ struct
   type message =
     | Append of append
     | Vote of vote
-    | AppendSuccess
+    | AppendSuccess of int
     | AppendFailed
     | VoteGranted
     | VoteDeclined
@@ -113,32 +113,36 @@ struct
     else
       [], raft
 
-  let handle_rpc raft { sender; term = _; message } =
+  let handle_rpc (raft:t) { sender; term = _; message } =
     let rpc, raft = match message with
       | Append append ->
+        let raft = { raft with log = append.log @ raft.log; commit = append.commit } in
         let resp = {
           sender = raft.self;
           term = raft.term;
-          message = AppendSuccess
+          message = AppendSuccess (last_log_index raft)
         } in
-        [Rpc (sender, resp)], { raft with log = append.log @ raft.log; commit = append.commit }
-      | AppendSuccess ->
-        let next = List.Assoc.find_exn raft.next_index sender in
-        let index = min next (last_log_index raft) in
+        [Rpc (sender, resp)], raft
+      | AppendSuccess index ->
+        let next_index = List.Assoc.add raft.next_index sender (index + 1) in
         let match_index = List.Assoc.add raft.match_index sender index in
-        [], { raft with match_index; commit = index }
-      | _ ->
+        [], { raft with match_index; next_index; commit = index }
+      | AppendFailed
+      | Vote _
+      | VoteGranted
+      | VoteDeclined ->
         [], raft
     in
     let uncommitted = List.filter raft.log ~f:(fun entry ->
         (entry.index > raft.last_applied) && (entry.index <= raft.commit)
       )
     in
-    let (_, state) = List.fold_right uncommitted ~init:([], raft.state) ~f:(fun entry (_, state)  ->
-        let (_, state) = State.apply state entry.command in
-        [], state
+    let (io, state) = List.fold_right uncommitted ~init:(rpc, raft.state) ~f:(fun entry (io, state)  ->
+        let (response, state) = State.apply state entry.command in
+        (Response (entry.index, response)) :: io, state
       ) in
-    rpc, { raft with state }
+    let last_applied = last_log_index raft in
+    io, { raft with state; last_applied }
 
   let handle_command raft command =
     let index = (last_log_index raft) + 1 in

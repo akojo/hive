@@ -48,7 +48,7 @@ sig
   type message =
     | Append of append
     | Vote of vote
-    | AppendSuccess
+    | AppendSuccess of int
     | AppendFailed
     | VoteGranted
     | VoteDeclined
