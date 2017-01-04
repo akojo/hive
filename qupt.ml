@@ -1,6 +1,6 @@
 open Core.Std
 
-include Raft_intf
+include Qupt_intf
 
 module Make (State : State_machine) (Id: Id)
   : S with type state := State.t
@@ -24,14 +24,14 @@ struct
     role: role;
     configuration: Id.t list;
     state: State.t;
-    (* Persistent Raft state *)
+    (* Persistent Qupt state *)
     term: int;
     voted: string option;
     log: log_entry list;
-    (* Volatile Raft state *)
+    (* Volatile Qupt state *)
     commit: int;
     last_applied: int;
-    (* Volatile Raft state on leaders *)
+    (* Volatile Qupt state on leaders *)
     next_index: (Id.t * int) list;
     match_index: (Id.t * int) list;
   }
@@ -84,69 +84,69 @@ struct
       match_index = List.map followers ~f:(fun id -> (id, 0));
     }
 
-  let last_log_index (raft:t) =
-    List.hd raft.log |> Option.value_map ~f:(fun e -> e.index) ~default:0
+  let last_log_index (qupt:t) =
+    List.hd qupt.log |> Option.value_map ~f:(fun e -> e.index) ~default:0
 
-  let handle_timeout raft =
-    if raft.role = Leader then
-      let io = List.map raft.next_index ~f:(fun (id, idx) ->
-          let log = List.take_while raft.log ~f:(fun entry ->
+  let handle_timeout qupt =
+    if qupt.role = Leader then
+      let io = List.map qupt.next_index ~f:(fun (id, idx) ->
+          let log = List.take_while qupt.log ~f:(fun entry ->
               entry.index >= idx
             )
           in
           let prev_idx, prev_term = if idx > 1 then
-              let e = List.find_exn raft.log ~f:(fun e -> e.index = idx - 1) in
+              let e = List.find_exn qupt.log ~f:(fun e -> e.index = idx - 1) in
               e.index, e.term
             else
               (0,0)
           in
           Rpc (id, {
-              sender = raft.self;
-              term = raft.term;
+              sender = qupt.self;
+              term = qupt.term;
               message = Append {
-                  prev_idx; prev_term; log; commit = raft.commit
+                  prev_idx; prev_term; log; commit = qupt.commit
                 }
             })
         )
       in
-      io, raft
+      io, qupt
     else
-      [], raft
+      [], qupt
 
-  let handle_rpc (raft:t) { sender; term = _; message } =
-    let rpc, raft = match message with
+  let handle_rpc (qupt:t) { sender; term = _; message } =
+    let rpc, qupt = match message with
       | Append append ->
-        let raft = { raft with log = append.log @ raft.log; commit = append.commit } in
+        let qupt = { qupt with log = append.log @ qupt.log; commit = append.commit } in
         let resp = {
-          sender = raft.self;
-          term = raft.term;
-          message = AppendSuccess (last_log_index raft)
+          sender = qupt.self;
+          term = qupt.term;
+          message = AppendSuccess (last_log_index qupt)
         } in
-        [Rpc (sender, resp)], raft
+        [Rpc (sender, resp)], qupt
       | AppendSuccess index ->
-        let next_index = List.Assoc.add raft.next_index sender (index + 1) in
-        let match_index = List.Assoc.add raft.match_index sender index in
-        [], { raft with match_index; next_index; commit = index }
+        let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
+        let match_index = List.Assoc.add qupt.match_index sender index in
+        [], { qupt with match_index; next_index; commit = index }
       | AppendFailed
       | Vote _
       | VoteGranted
       | VoteDeclined ->
-        [], raft
+        [], qupt
     in
-    let uncommitted = List.filter raft.log ~f:(fun entry ->
-        (entry.index > raft.last_applied) && (entry.index <= raft.commit)
+    let uncommitted = List.filter qupt.log ~f:(fun entry ->
+        (entry.index > qupt.last_applied) && (entry.index <= qupt.commit)
       )
     in
-    let (io, state) = List.fold_right uncommitted ~init:(rpc, raft.state) ~f:(fun entry (io, state)  ->
+    let (io, state) = List.fold_right uncommitted ~init:(rpc, qupt.state) ~f:(fun entry (io, state)  ->
         let (response, state) = State.apply state entry.command in
         (Response (entry.index, response)) :: io, state
       ) in
-    let last_applied = last_log_index raft in
-    io, { raft with state; last_applied }
+    let last_applied = last_log_index qupt in
+    io, { qupt with state; last_applied }
 
-  let handle_command raft command =
-    let index = (last_log_index raft) + 1 in
-    let log = { index; term = raft.term; command } :: raft.log in
-    let io, raft = handle_timeout { raft with log } in
-    index, io, raft
+  let handle_command qupt command =
+    let index = (last_log_index qupt) + 1 in
+    let log = { index; term = qupt.term; command } :: qupt.log in
+    let io, qupt = handle_timeout { qupt with log } in
+    index, io, qupt
 end

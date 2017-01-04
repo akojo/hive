@@ -23,7 +23,7 @@ module Key_value_store = struct
       { key; value = Map.find store key }, store
 end
 
-module Hive = Raft.Make(Key_value_store)(Int64)
+module Zoku = Qupt.Make(Key_value_store)(Int64)
 
 type ext_config = {
   hosts: (Unix.Inet_addr.Blocking_sexp.t * int) list
@@ -32,9 +32,9 @@ type ext_config = {
 type cluster = Unix.sockaddr_blocking_sexp Int64.Map.t [@@deriving sexp]
 
 type server_state = {
-  hive_fd: Unix.File_descr.t;
+  zoku_fd: Unix.File_descr.t;
   client_fd: Unix.File_descr.t;
-  raft: Hive.t;
+  qupt: Zoku.t;
   cluster: cluster;
   pending: (int * Unix.sockaddr) list;
 }
@@ -77,11 +77,11 @@ let do_io state messages =
   let cluster = state.cluster in
   List.iter messages ~f:(fun message ->
       match message with
-      | Hive.Rpc (id, rpc) ->
+      | Zoku.Rpc (id, rpc) ->
         let addr = Map.find_exn cluster id in
-        let buf = Hive.sexp_of_rpc rpc |> Sexp.to_string_hum in
-        ignore Unix.(sendto state.hive_fd ~buf ~pos:0 ~len:(String.length buf) ~mode:[] ~addr)
-      | Hive.Response (id, response) ->
+        let buf = Zoku.sexp_of_rpc rpc |> Sexp.to_string_hum in
+        ignore Unix.(sendto state.zoku_fd ~buf ~pos:0 ~len:(String.length buf) ~mode:[] ~addr)
+      | Zoku.Response (id, response) ->
         (match List.Assoc.find state.pending id with
          | Some addr ->
            let buf = Key_value_store.sexp_of_response response |> Sexp.to_string_hum in
@@ -92,11 +92,11 @@ let do_io state messages =
     )
 
 let handle_timeout state =
-  let messages, raft = Hive.handle_timeout state.raft in
+  let messages, qupt = Zoku.handle_timeout state.qupt in
   let () = do_io state messages in
-  { state with raft }
+  { state with qupt }
 
-let run hive_port client_port leader bind_to configuration () =
+let run zoku_port client_port leader bind_to configuration () =
   let bind_addr = match bind_to with
     | Some addr -> Unix.Inet_addr.of_string addr
     | None -> Unix.Inet_addr.bind_any
@@ -106,24 +106,24 @@ let run hive_port client_port leader bind_to configuration () =
     let (len, addr) = Unix.recvfrom fd ~buf:buf ~pos:0 ~len:65536 ~mode:[] in
     let input = String.slice buf 0 len |> String.strip in
     let () = print_endline input in
-    if fd = state.hive_fd then
-      parse_sexp input Hive.rpc_of_sexp fd addr
+    if fd = state.zoku_fd then
+      parse_sexp input Zoku.rpc_of_sexp fd addr
       |> Option.value_map ~default:state ~f:(fun rpc ->
-          let io, raft = Hive.handle_rpc state.raft rpc in
+          let io, qupt = Zoku.handle_rpc state.qupt rpc in
           let () = do_io state io in
-          { state with raft }
+          { state with qupt }
         )
     else
       parse_sexp input Key_value_store.command_of_sexp fd addr
       |> Option.value_map ~default:state ~f:(fun command ->
-          let index, io, raft = Hive.handle_command state.raft command in
+          let index, io, qupt = Zoku.handle_command state.qupt command in
           let pending = List.Assoc.add state.pending index addr in
           let () = do_io state io in
-          { state with raft; pending }
+          { state with qupt; pending }
         )
   in
   let rec loop state =
-    let read_fds = [state.hive_fd; state.client_fd] in
+    let read_fds = [state.zoku_fd; state.client_fd] in
     let timeout = `After (Time_ns.Span.of_sec 1.0) in
     let fds = Unix.select ~read:read_fds ~write:[] ~except:[] ~timeout () in
     let open Unix.Select_fds in
@@ -132,20 +132,20 @@ let run hive_port client_port leader bind_to configuration () =
     else
       List.fold_left ~init:state fds.read ~f:handle_read |> loop
   in
-  let hive_fd = bind_socket bind_addr hive_port in
+  let zoku_fd = bind_socket bind_addr zoku_port in
   let client_fd = bind_socket bind_addr client_port in
-  let self, cluster = read_configuration (bind_addr, hive_port) configuration in
-  let role = if leader then Hive.Leader else Hive.Follower in
+  let self, cluster = read_configuration (bind_addr, zoku_port) configuration in
+  let role = if leader then Zoku.Leader else Zoku.Follower in
   let ids = Map.keys cluster in
-  let raft = Hive.init self role ids Key_value_store.empty in
-  loop { hive_fd; client_fd; raft; cluster; pending = [] }
+  let qupt = Zoku.init self role ids Key_value_store.empty in
+  loop { zoku_fd; client_fd; qupt; cluster; pending = [] }
 
 let () = Command.run
     (Command.basic
-       ~summary:"Start a hive node"
+       ~summary:"Start a zoku node"
        Command.Spec.(
          empty
-         +> flag "-P" (optional_with_default 7383 int) ~doc:"port hive port (default 7383)"
+         +> flag "-P" (optional_with_default 7383 int) ~doc:"port zoku port (default 7383)"
          +> flag "-p" (optional_with_default 2360 int) ~doc:"port client port (default 2360)"
          +> flag "-L" no_arg ~doc:"start as a leader"
          +> flag "-b" (optional string) ~doc:"address ip addres to bind to (default 0.0.0.0)"
