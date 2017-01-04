@@ -84,28 +84,25 @@ struct
       match_index = List.map followers ~f:(fun id -> (id, 0));
     }
 
-  let last_log_index (qupt:t) =
-    List.hd qupt.log |> Option.value_map ~f:(fun e -> e.index) ~default:0
+  let last_log_index log =
+    List.hd log |> Option.value_map ~f:(fun e -> e.index) ~default:0
+
+  let find_index (log:log_entry list) term idx =
+    List.drop_while log ~f:(fun el -> el.term <> term || el.index <> idx)
 
   let handle_timeout qupt =
     if qupt.role = Leader then
       let io = List.map qupt.next_index ~f:(fun (id, idx) ->
-          let log = List.take_while qupt.log ~f:(fun entry ->
-              entry.index >= idx
-            )
-          in
-          let prev_idx, prev_term = if idx > 1 then
-              let e = List.find_exn qupt.log ~f:(fun e -> e.index = idx - 1) in
-              e.index, e.term
-            else
-              (0,0)
+          let log = List.take_while qupt.log ~f:(fun e -> e.index >= idx) in
+          let prev_idx, prev_term =
+            match List.find qupt.log ~f:(fun e -> e.index < idx) with
+            | Some e -> e.index, e.term
+            | None -> 0,0
           in
           Rpc (id, {
               sender = qupt.self;
               term = qupt.term;
-              message = Append {
-                  prev_idx; prev_term; log; commit = qupt.commit
-                }
+              message = Append { prev_idx; prev_term; log; commit = qupt.commit }
             })
         )
       in
@@ -113,16 +110,30 @@ struct
     else
       [], qupt
 
-  let handle_rpc (qupt:t) { sender; term = _; message } =
+  let handle_append (qupt:t) append =
+    let log = find_index qupt.log append.prev_term append.prev_idx in
+    let message, qupt = if append.prev_idx <> 0 && List.is_empty log then
+        AppendFailed, qupt
+      else
+        let qupt = { qupt with log = append.log @ log; commit = append.commit } in
+        AppendSuccess (last_log_index qupt.log), qupt
+    in
+    { sender = qupt.self; term = qupt.term; message }, qupt
+
+  let handle_rpc (qupt:t) { sender; term; message } =
+    let qupt = if term > qupt.term then
+        { qupt with term}
+      else
+        qupt
+    in
     let rpc, qupt = match message with
       | Append append ->
-        let qupt = { qupt with log = append.log @ qupt.log; commit = append.commit } in
-        let resp = {
-          sender = qupt.self;
-          term = qupt.term;
-          message = AppendSuccess (last_log_index qupt)
-        } in
-        [Rpc (sender, resp)], qupt
+        if term < qupt.term then
+          let resp = { sender = qupt.self; term = qupt.term; message = AppendFailed } in
+          [Rpc (sender, resp)], qupt
+        else
+          let resp, qupt = handle_append qupt append in
+          [Rpc (sender, resp)], qupt
       | AppendSuccess index ->
         let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
         let match_index = List.Assoc.add qupt.match_index sender index in
@@ -137,15 +148,14 @@ struct
         (entry.index > qupt.last_applied) && (entry.index <= qupt.commit)
       )
     in
-    let (io, state) = List.fold_right uncommitted ~init:(rpc, qupt.state) ~f:(fun entry (io, state)  ->
-        let (response, state) = State.apply state entry.command in
+    let io, state = List.fold_right uncommitted ~init:(rpc, qupt.state) ~f:(fun entry (io, state)  ->
+        let response, state = State.apply state entry.command in
         (Response (entry.index, response)) :: io, state
       ) in
-    let last_applied = last_log_index qupt in
-    io, { qupt with state; last_applied }
+    io, { qupt with state; last_applied = qupt.commit }
 
-  let handle_command qupt command =
-    let index = (last_log_index qupt) + 1 in
+  let handle_command (qupt:t) command =
+    let index = (last_log_index qupt.log) + 1 in
     let log = { index; term = qupt.term; command } :: qupt.log in
     let io, qupt = handle_timeout { qupt with log } in
     index, io, qupt

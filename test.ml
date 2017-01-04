@@ -79,6 +79,28 @@ let follower_2 =
         assert_equal ~printer:print_io [Rpc (0, response (AppendSuccess 1))] io
       );
 
+    "larger term increases term number" >:: test (fun _ ->
+        let rpc = append ~term:1 [{ index = 1; term = 1; command = 17 }] in
+        let (io, _) = handle_rpc qupt rpc in
+        assert_equal ~printer:print_io [Rpc (0, response ~term:1 (AppendSuccess 1))] io
+      );
+
+    "append with old term returns failure to leader" >:: test (fun _ ->
+        let rpc = append ~term:1 [{ index = 1; term = 0; command = 17 }] in
+        let (_, qupt) = handle_rpc qupt rpc in
+        let rpc = append [{ index = 1; term = 0; command = 18 }] in
+        let (io, _) = handle_rpc qupt rpc in
+        assert_equal ~printer:print_io [Rpc (0, response ~term:1 AppendFailed)] io
+      );
+
+    "append returns failure when prev index not found" >:: test (fun _ ->
+        let rpc = append [{ index = 1; term = 0; command = 17 }] in
+        let (_, qupt) = handle_rpc qupt rpc in
+        let rpc = append ~prev_idx:2 [{ index = 3; term = 0; command = 18 }] in
+        let (io, _) = handle_rpc qupt rpc in
+        assert_equal ~printer:print_io [Rpc (0, response AppendFailed)] io
+      );
+
     "leader commit commits log" >:: test (fun state ->
         let rpc = append ~commit:2 [
             { index = 2; term = 0; command = 19 };
@@ -86,6 +108,20 @@ let follower_2 =
           ] in
         let _ = handle_rpc qupt rpc in
         assert_equal ~printer:print_state [19; 18] !state
+      );
+
+    "append removes entries not in leader log" >:: test (fun state ->
+        let rpc = append [
+            { index = 3; term = 0; command = 20 };
+            { index = 2; term = 0; command = 19 };
+            { index = 1; term = 0; command = 18 };
+          ] in
+        let (_, qupt) = handle_rpc qupt rpc in
+        let rpc = append ~commit:2 ~prev_idx:1 [
+            { index = 2; term = 0; command = 30 }
+          ] in
+        let _ = handle_rpc qupt rpc in
+        assert_equal ~printer:print_state [30; 18] !state
       );
   ]
 
