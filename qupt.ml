@@ -50,9 +50,9 @@ struct
 
   type message =
     | Append of append
-    | Vote of vote
     | AppendSuccess of int
     | AppendFailed of int
+    | Vote of vote
     | VoteGranted
     | VoteDeclined
   [@@deriving sexp]
