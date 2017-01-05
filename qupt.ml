@@ -52,7 +52,7 @@ struct
     | Append of append
     | Vote of vote
     | AppendSuccess of int
-    | AppendFailed
+    | AppendFailed of int
     | VoteGranted
     | VoteDeclined
   [@@deriving sexp]
@@ -113,7 +113,7 @@ struct
   let handle_append (qupt:t) append =
     let log = find_index qupt.log append.prev_term append.prev_idx in
     let message, qupt = if append.prev_idx <> 0 && List.is_empty log then
-        AppendFailed, qupt
+        (AppendFailed qupt.commit), qupt
       else
         let qupt = { qupt with log = append.log @ log; commit = append.commit } in
         AppendSuccess (last_log_index qupt.log), qupt
@@ -129,7 +129,7 @@ struct
     let rpc, qupt = match message with
       | Append append ->
         if term < qupt.term then
-          let resp = { sender = qupt.self; term = qupt.term; message = AppendFailed } in
+          let resp = { sender = qupt.self; term = qupt.term; message = (AppendFailed 0) } in
           [Rpc (sender, resp)], qupt
         else
           let resp, qupt = handle_append qupt append in
@@ -138,7 +138,7 @@ struct
         let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
         let match_index = List.Assoc.add qupt.match_index sender index in
         [], { qupt with match_index; next_index; commit = index }
-      | AppendFailed
+      | AppendFailed _
       | Vote _
       | VoteGranted
       | VoteDeclined ->

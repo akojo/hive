@@ -90,7 +90,7 @@ let follower_2 =
         let (_, qupt) = handle_rpc qupt rpc in
         let rpc = append [{ index = 1; term = 0; command = 18 }] in
         let (io, _) = handle_rpc qupt rpc in
-        assert_equal ~printer:print_io [Rpc (0, response ~term:1 AppendFailed)] io
+        assert_equal ~printer:print_io [Rpc (0, response ~term:1 (AppendFailed 0))] io
       );
 
     "append returns failure when prev index not found" >:: test (fun _ ->
@@ -98,7 +98,21 @@ let follower_2 =
         let (_, qupt) = handle_rpc qupt rpc in
         let rpc = append ~prev_idx:2 [{ index = 3; term = 0; command = 18 }] in
         let (io, _) = handle_rpc qupt rpc in
-        assert_equal ~printer:print_io [Rpc (0, response AppendFailed)] io
+        assert_equal ~printer:print_io [Rpc (0, response (AppendFailed 0))] io
+      );
+
+    "append failure returns last committed index" >:: test (fun _ ->
+        let rpc = append ~commit:1 [
+            { index = 4; term = 0; command = 20 };
+            { index = 3; term = 0; command = 19 };
+            { index = 1; term = 0; command = 18 };
+          ] in
+        let (_, qupt) = handle_rpc qupt rpc in
+        let rpc = append ~prev_idx:2 [
+            { index = 4; term = 0; command = 20 }
+          ] in
+        let (io, _) = handle_rpc qupt rpc in
+        assert_equal ~printer:print_io [Rpc (0, response (AppendFailed 1))] io
       );
 
     "leader commit commits log" >:: test (fun state ->

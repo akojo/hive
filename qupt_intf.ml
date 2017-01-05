@@ -49,7 +49,7 @@ sig
     | Append of append
     | Vote of vote
     | AppendSuccess of int
-    | AppendFailed
+    | AppendFailed of int
     | VoteGranted
     | VoteDeclined
   [@@deriving sexp]
