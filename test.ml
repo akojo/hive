@@ -73,6 +73,48 @@ let leader_2 =
       );
   ]
 
+let leader_4 =
+  let open Test_qupt in
+  let qupt = init 0 Leader [0;1;2;3] test_state in
+  "leader (4 nodes)" >::: [
+    "client command sends append to all nodes" >:: test (fun _ ->
+        let (_, io, _) = handle_command qupt 110 in
+        let expected = append [{ index = 1; term = 0; command = 110}] in
+        assert_io [Rpc (1, expected); Rpc (2, expected); Rpc (3, expected)] io
+      );
+
+    "minority does not commit log" >:: test (fun state ->
+        let (_, _, qupt) = handle_command qupt 110 in
+        let (io, _) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
+        assert_io [] io;
+        assert_state [] state
+      );
+
+    "majority commits log" >:: test (fun state ->
+        let (index, _, qupt) = handle_command qupt 110 in
+        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
+        let (io, _) = handle_rpc qupt (response ~sender:2 (AppendSuccess 1)) in
+        assert_io [Response (index, 110)] io;
+        assert_state [110] state
+      );
+
+    "client response is sent only after first majority" >:: test (fun _ ->
+        let (_, _, qupt) = handle_command qupt 110 in
+        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
+        let (_, qupt) = handle_rpc qupt (response ~sender:2 (AppendSuccess 1)) in
+        let (io, _) = handle_rpc qupt (response ~sender:3 (AppendSuccess 1)) in
+        assert_io [] io
+      );
+
+    "new state is committed only once" >:: test (fun state ->
+        let (_, _, qupt) = handle_command qupt 110 in
+        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
+        let (_, qupt) = handle_rpc qupt (response ~sender:2 (AppendSuccess 1)) in
+        let _ = handle_rpc qupt (response ~sender:3 (AppendSuccess 1)) in
+        assert_state [110] state
+      )
+  ]
+
 let follower_2 =
   let open Test_qupt in
   let qupt = init 1 Follower [0;1] test_state in
@@ -159,6 +201,7 @@ let follower_2 =
 let () =
   let tests = test_list [
       leader_2;
+      leader_4;
       follower_2
     ]
   in

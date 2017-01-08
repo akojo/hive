@@ -121,12 +121,17 @@ struct
     in
     { sender = qupt.self; term = qupt.term; message }, qupt
 
+  let commit_if_majority (qupt:t) index =
+    let in_log = List.exists qupt.log ~f:(fun e -> e.index = index && e.term = qupt.term) in
+    let matches = List.count qupt.match_index ~f:(fun (_, i) -> i >= index) in
+    let nodes = List.length qupt.configuration in
+    if in_log && matches >= nodes / 2 then
+      { qupt with commit = index }
+    else
+      qupt
+
   let handle_rpc (qupt:t) { sender; term; message } =
-    let qupt = if term > qupt.term then
-        { qupt with term}
-      else
-        qupt
-    in
+    let qupt = if term > qupt.term then { qupt with term} else qupt in
     let rpc, qupt = match message with
       | Append append ->
         if term < qupt.term then
@@ -138,7 +143,7 @@ struct
       | AppendSuccess index ->
         let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
         let match_index = List.Assoc.add qupt.match_index sender index in
-        [], { qupt with match_index; next_index; commit = index }
+        [], commit_if_majority { qupt with match_index; next_index } index
       | AppendFailed _
       | Vote _
       | VoteGranted
