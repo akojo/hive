@@ -93,9 +93,8 @@ struct
   let handle_timeout qupt =
     if qupt.role = Leader then
       let io = List.map qupt.next_index ~f:(fun (id, idx) ->
-          let log = List.take_while qupt.log ~f:(fun e -> e.index >= idx) in
-          let prev_idx, prev_term =
-            match List.find qupt.log ~f:(fun e -> e.index < idx) with
+          let log, prev = List.split_while qupt.log ~f:(fun e -> e.index >= idx) in
+          let prev_idx, prev_term = match List.hd prev with
             | Some e -> e.index, e.term
             | None -> 0,0
           in
