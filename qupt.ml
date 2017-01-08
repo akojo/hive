@@ -114,7 +114,9 @@ struct
     let message, qupt = if append.prev_idx <> 0 && List.is_empty log then
         (AppendFailed qupt.commit), qupt
       else
-        let qupt = { qupt with log = append.log @ log; commit = append.commit } in
+        let log = append.log @ log in
+        let last = last_log_index log in
+        let qupt = { qupt with log; commit = min last append.commit } in
         AppendSuccess (last_log_index qupt.log), qupt
     in
     { sender = qupt.self; term = qupt.term; message }, qupt

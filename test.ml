@@ -137,6 +137,19 @@ let follower_2 =
         let _ = handle_rpc qupt rpc in
         assert_equal ~printer:print_state [30; 18] !state
       );
+
+    "append commits min(commit, last index)" >:: test (fun state ->
+        let rpc = append ~commit:3 [{ index = 1; term = 0; command = 100 }] in
+        let (_, qupt) = handle_rpc qupt rpc in
+        let () = assert_equal ~printer:print_state [100] !state in
+        let rpc = append ~commit:3 [
+            { index = 3; term = 0; command = 102 };
+            { index = 2; term = 0; command = 101 }
+          ]
+        in
+        let _ = handle_rpc qupt rpc in
+        assert_equal ~printer:print_state [102; 101; 100] !state
+      )
   ]
 
 let () =
