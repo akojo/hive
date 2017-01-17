@@ -72,6 +72,11 @@ struct
       match_index = List.map followers ~f:(fun id -> (id, 0));
     }
 
+  let last_log_entry log =
+    match log with
+    | (index, term, _) :: _ -> index, term
+    | [] -> 0, 0
+
   let last_log_index log =
     match log with
     | (index, _, _) :: _ -> index
@@ -85,13 +90,26 @@ struct
       let io = List.map qupt.next_index ~f:(fun (id, idx) ->
           let log, prev = List.split_while qupt.log ~f:(fun (i, _, _) -> i >= idx) in
           let prev_idx, prev_term = match List.hd prev with
-            | Some (index, term, _) ->index, term
+            | Some (index, term, _) -> index, term
             | None -> 0,0
           in
           Rpc (id, {
               sender = qupt.self;
               term = qupt.term;
               message = Append (prev_idx, prev_term, qupt.commit, log)
+            })
+        )
+      in
+      io, qupt
+    else if qupt.role = Follower then
+      let qupt = { qupt with term = qupt.term + 1 } in
+      let others = List.filter qupt.configuration ~f:((<>) qupt.self) in
+      let io = List.map others ~f:(fun id ->
+          let last_idx, last_term = last_log_entry qupt.log in
+          Rpc (id, {
+              sender = qupt.self;
+              term = qupt.term;
+              message = Vote { last_idx; last_term }
             })
         )
       in

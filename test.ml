@@ -26,6 +26,9 @@ let append ?(sender = 0) ?(term = 0) ?(prev_idx = 0) ?(prev_term = 0) ?(commit =
 let response ?(sender = 1) ?(term = 0) message =
   Test_qupt.{ sender; term; message}
 
+let vote ?(sender = 1) ?(term = 0) last_idx last_term =
+  Test_qupt.{ sender; term; message = Vote { last_idx; last_term }}
+
 let assert_io expected actual =
   let print_io io = [%sexp_of: Test_qupt.io list] io |> Sexp.to_string_hum in
   assert_equal ~printer:print_io expected actual
@@ -184,7 +187,12 @@ let follower_2 =
         let rpc = append ~commit:3 [(3, 0, 102); (2, 0, 101)] in
         let _ = handle_rpc qupt rpc in
         assert_state [102; 101; 100] state
-      )
+      );
+
+    "convert to candidate if election timeout elapses" >:: (fun _ ->
+        let (io, _) = handle_timeout qupt in
+        assert_io [Rpc (0, vote ~term:1 0 0)] io
+      );
   ]
 
 let () =
