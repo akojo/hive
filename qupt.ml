@@ -85,19 +85,20 @@ struct
   let find_index (log:log_entry list) index term =
     List.drop_while log ~f:(fun (i, t, _) -> i <> index || t  <> term)
 
+  let make_rpc qupt message = { sender = qupt.self; term = qupt.term; message }
+
+  let send_append qupt index =
+    let log, prev = List.split_while qupt.log ~f:(fun (i, _, _) -> i >= index) in
+    let prev_idx, prev_term = match List.hd prev with
+      | Some (index, term, _) -> index, term
+      | None -> 0,0
+    in
+    make_rpc qupt (Append (prev_idx, prev_term, qupt.commit, log))
+
   let handle_timeout qupt =
     if qupt.role = Leader then
-      let io = List.map qupt.next_index ~f:(fun (id, idx) ->
-          let log, prev = List.split_while qupt.log ~f:(fun (i, _, _) -> i >= idx) in
-          let prev_idx, prev_term = match List.hd prev with
-            | Some (index, term, _) -> index, term
-            | None -> 0,0
-          in
-          Rpc (id, {
-              sender = qupt.self;
-              term = qupt.term;
-              message = Append (prev_idx, prev_term, qupt.commit, log)
-            })
+      let io = List.map qupt.next_index ~f:(fun (id, index) ->
+          Rpc (id, send_append qupt index)
         )
       in
       io, qupt
@@ -106,11 +107,7 @@ struct
       let others = List.filter qupt.configuration ~f:((<>) qupt.self) in
       let io = List.map others ~f:(fun id ->
           let last_idx, last_term = last_log_entry qupt.log in
-          Rpc (id, {
-              sender = qupt.self;
-              term = qupt.term;
-              message = Vote { last_idx; last_term }
-            })
+          Rpc (id, make_rpc qupt (Vote { last_idx; last_term }))
         )
       in
       io, qupt
@@ -127,7 +124,7 @@ struct
         let qupt = { qupt with log; commit = min last commit } in
         AppendResponse (true, last), qupt
     in
-    { sender = qupt.self; term = qupt.term; message }, qupt
+    make_rpc qupt message, qupt
 
   let commit_if_majority (qupt:t) index =
     let in_log = List.exists qupt.log ~f:(fun (i, t, _) -> i = index && t = qupt.term) in
@@ -147,26 +144,25 @@ struct
       && vote.last_term >= last_term
     in
     let message = if valid_vote then VoteGranted else VoteDeclined in
-    let response = { sender = qupt.self; term = qupt.term; message } in
-    [Rpc (sender, response)], qupt
+    [Rpc (sender, make_rpc qupt message)], qupt
 
   let handle_rpc (qupt:t) { sender; term; message } =
     let qupt = if term > qupt.term then { qupt with term} else qupt in
     let rpc, qupt = match message with
       | Append (prev_idx, prev_term, commit, log) ->
         if term < qupt.term then
-          let resp = { sender = qupt.self; term = qupt.term; message = (AppendResponse (false, 0)) } in
-          [Rpc (sender, resp)], qupt
+          [Rpc (sender, make_rpc qupt (AppendResponse (false, 0)))], qupt
         else
           let resp, qupt = handle_append qupt prev_idx prev_term commit log in
           [Rpc (sender, resp)], qupt
       | AppendResponse (success, index) ->
         let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
         let match_index = List.Assoc.add qupt.match_index sender index in
+        let qupt = { qupt with match_index; next_index } in
         if success then
-          [], commit_if_majority { qupt with match_index; next_index } index
+          [], commit_if_majority qupt index
         else
-          handle_timeout { qupt with match_index; next_index }
+          [Rpc (sender, send_append qupt (index + 1))], qupt
       | Vote vote ->
         handle_vote qupt sender term vote
       | VoteGranted
