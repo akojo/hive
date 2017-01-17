@@ -37,8 +37,7 @@ sig
   type message =
     (* previous index, previous term, commit, log *)
     | Append of int * int * int * log_entry list
-    | AppendSuccess of int
-    | AppendFailed of int
+    | AppendResponse of bool * int
     | Vote of vote
     | VoteGranted
     | VoteDeclined

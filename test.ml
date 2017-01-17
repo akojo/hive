@@ -55,27 +55,27 @@ let leader_2 =
 
     "succesful append response commits log entry" >:: test (fun state ->
         let (_, _, qupt) = handle_command qupt 18 in
-        let _ = handle_rpc qupt (response (AppendSuccess 1)) in
+        let _ = handle_rpc qupt (response (AppendResponse (true, 1))) in
         assert_state [18] state
       );
 
     "commit index is incremented after commit" >:: test (fun _ ->
         let (_, _, qupt) = handle_command qupt 18 in
-        let (_, qupt) = handle_rpc qupt (response (AppendSuccess 1)) in
+        let (_, qupt) = handle_rpc qupt (response (AppendResponse (true, 1))) in
         let (io, _) = handle_timeout qupt in
         assert_io [Rpc (1, append ~prev_idx:1 ~commit:1 [])] io
       );
 
     "client response is sent after commit" >:: test (fun _ ->
         let (index, _, qupt) = handle_command qupt 18 in
-        let (io, _) = handle_rpc qupt (response (AppendSuccess 1)) in
+        let (io, _) = handle_rpc qupt (response (AppendResponse (true, 1))) in
         assert_io [Response (index, 18)] io
       );
 
     "append failure sends logs from last client commmit" >:: test (fun _ ->
         let _, _, qupt = handle_command qupt 18 in
         let _, _, qupt = handle_command qupt 19 in
-        let io, _ = handle_rpc qupt (response (AppendFailed 1)) in
+        let io, _ = handle_rpc qupt (response (AppendResponse (false, 1))) in
         let expected = [(2, 0, 19)] in
         assert_io [Rpc (1, append ~prev_idx:1 expected)] io
       );
@@ -93,32 +93,32 @@ let leader_4 =
 
     "minority does not commit log" >:: test (fun state ->
         let (_, _, qupt) = handle_command qupt 110 in
-        let (io, _) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
+        let (io, _) = handle_rpc qupt (response ~sender:1 (AppendResponse (true, 1))) in
         assert_io [] io;
         assert_state [] state
       );
 
     "majority commits log" >:: test (fun state ->
         let (index, _, qupt) = handle_command qupt 110 in
-        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
-        let (io, _) = handle_rpc qupt (response ~sender:2 (AppendSuccess 1)) in
+        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendResponse (true, 1))) in
+        let (io, _) = handle_rpc qupt (response ~sender:2 (AppendResponse (true, 1))) in
         assert_io [Response (index, 110)] io;
         assert_state [110] state
       );
 
     "client response is sent only after first majority" >:: test (fun _ ->
         let (_, _, qupt) = handle_command qupt 110 in
-        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
-        let (_, qupt) = handle_rpc qupt (response ~sender:2 (AppendSuccess 1)) in
-        let (io, _) = handle_rpc qupt (response ~sender:3 (AppendSuccess 1)) in
+        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendResponse (true, 1))) in
+        let (_, qupt) = handle_rpc qupt (response ~sender:2 (AppendResponse (true, 1))) in
+        let (io, _) = handle_rpc qupt (response ~sender:3 (AppendResponse (true, 1))) in
         assert_io [] io
       );
 
     "new state is committed only once" >:: test (fun state ->
         let (_, _, qupt) = handle_command qupt 110 in
-        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendSuccess 1)) in
-        let (_, qupt) = handle_rpc qupt (response ~sender:2 (AppendSuccess 1)) in
-        let _ = handle_rpc qupt (response ~sender:3 (AppendSuccess 1)) in
+        let (_, qupt) = handle_rpc qupt (response ~sender:1 (AppendResponse (true, 1))) in
+        let (_, qupt) = handle_rpc qupt (response ~sender:2 (AppendResponse (true, 1))) in
+        let _ = handle_rpc qupt (response ~sender:3 (AppendResponse (true, 1))) in
         assert_state [110] state
       )
   ]
@@ -130,13 +130,13 @@ let follower_2 =
     "append into empty state returns success to leader" >:: test (fun _ ->
         let rpc = append [(1, 0, 17)] in
         let (io, _) = handle_rpc qupt rpc in
-        assert_io [Rpc (0, response (AppendSuccess 1))] io
+        assert_io [Rpc (0, response (AppendResponse (true, 1)))] io
       );
 
     "larger term increases term number" >:: test (fun _ ->
         let rpc = append ~term:1 [(1, 1, 17)] in
         let (io, _) = handle_rpc qupt rpc in
-        assert_io [Rpc (0, response ~term:1 (AppendSuccess 1))] io
+        assert_io [Rpc (0, response ~term:1 (AppendResponse (true, 1)))] io
       );
 
     "append with old term returns failure to leader" >:: test (fun _ ->
@@ -144,7 +144,7 @@ let follower_2 =
         let (_, qupt) = handle_rpc qupt rpc in
         let rpc = append [(1, 0, 18)] in
         let (io, _) = handle_rpc qupt rpc in
-        assert_io [Rpc (0, response ~term:1 (AppendFailed 0))] io
+        assert_io [Rpc (0, response ~term:1 (AppendResponse (false, 0)))] io
       );
 
     "append returns failure when prev index not found" >:: test (fun _ ->
@@ -152,7 +152,7 @@ let follower_2 =
         let (_, qupt) = handle_rpc qupt rpc in
         let rpc = append ~prev_idx:2 [(3, 0, 18)] in
         let (io, _) = handle_rpc qupt rpc in
-        assert_io [Rpc (0, response (AppendFailed 0))] io
+        assert_io [Rpc (0, response (AppendResponse (false, 0)))] io
       );
 
     "append failure returns last committed index" >:: test (fun _ ->
@@ -160,7 +160,7 @@ let follower_2 =
         let (_, qupt) = handle_rpc qupt rpc in
         let rpc = append ~prev_idx:2 [(4, 0, 20)] in
         let (io, _) = handle_rpc qupt rpc in
-        assert_io [Rpc (0, response (AppendFailed 1))] io
+        assert_io [Rpc (0, response (AppendResponse (false, 1)))] io
       );
 
     "leader commit commits log" >:: test (fun state ->

@@ -39,8 +39,7 @@ struct
 
   type message =
     | Append of int * int * int * log_entry list
-    | AppendSuccess of int
-    | AppendFailed of int
+    | AppendResponse of bool * int
     | Vote of vote
     | VoteGranted
     | VoteDeclined
@@ -103,12 +102,12 @@ struct
   let handle_append (qupt:t) prev_idx prev_term commit log =
     let current_log = find_index qupt.log prev_idx prev_term in
     let message, qupt = if prev_idx <> 0 && List.is_empty current_log then
-        AppendFailed qupt.commit, qupt
+        AppendResponse (false, qupt.commit), qupt
       else
         let log = log @ current_log in
         let last = last_log_index log in
         let qupt = { qupt with log; commit = min last commit } in
-        AppendSuccess last, qupt
+        AppendResponse (true, last), qupt
     in
     { sender = qupt.self; term = qupt.term; message }, qupt
 
@@ -126,19 +125,18 @@ struct
     let rpc, qupt = match message with
       | Append (prev_idx, prev_term, commit, log) ->
         if term < qupt.term then
-          let resp = { sender = qupt.self; term = qupt.term; message = (AppendFailed 0) } in
+          let resp = { sender = qupt.self; term = qupt.term; message = (AppendResponse (false, 0)) } in
           [Rpc (sender, resp)], qupt
         else
           let resp, qupt = handle_append qupt prev_idx prev_term commit log in
           [Rpc (sender, resp)], qupt
-      | AppendSuccess index ->
+      | AppendResponse (success, index) ->
         let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
         let match_index = List.Assoc.add qupt.match_index sender index in
-        [], commit_if_majority { qupt with match_index; next_index } index
-      | AppendFailed index ->
-        let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
-        let match_index = List.Assoc.add qupt.match_index sender index in
-        handle_timeout { qupt with match_index; next_index }
+        if success then
+          [], commit_if_majority { qupt with match_index; next_index } index
+        else
+          handle_timeout { qupt with match_index; next_index }
       | Vote _
       | VoteGranted
       | VoteDeclined ->
