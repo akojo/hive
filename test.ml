@@ -71,6 +71,14 @@ let leader_2 =
         let (io, _) = handle_rpc qupt (response (AppendSuccess 1)) in
         assert_io [Response (index, 18)] io
       );
+
+    "append failure sends logs from last client commmit" >:: test (fun _ ->
+        let _, _, qupt = handle_command qupt 18 in
+        let _, _, qupt = handle_command qupt 19 in
+        let io, _ = handle_rpc qupt (response (AppendFailed 1)) in
+        let expected = [{index = 2; term = 0; command = 19 }] in
+        assert_io [Rpc (1, append ~prev_idx:1 expected)] io
+      );
   ]
 
 let leader_4 =

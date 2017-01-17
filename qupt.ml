@@ -144,7 +144,10 @@ struct
         let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
         let match_index = List.Assoc.add qupt.match_index sender index in
         [], commit_if_majority { qupt with match_index; next_index } index
-      | AppendFailed _
+      | AppendFailed index ->
+        let next_index = List.Assoc.add qupt.next_index sender (index + 1) in
+        let match_index = List.Assoc.add qupt.match_index sender index in
+        handle_timeout { qupt with match_index; next_index }
       | Vote _
       | VoteGranted
       | VoteDeclined ->
