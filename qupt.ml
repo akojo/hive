@@ -72,13 +72,11 @@ struct
       match_index = List.map followers ~f:(fun id -> (id, 0));
     }
 
-  let last_log_entry log =
-    match log with
+  let last_log_entry = function
     | (index, term, _) :: _ -> index, term
     | [] -> 0, 0
 
-  let last_log_index log =
-    match log with
+  let last_log_index = function
     | (index, _, _) :: _ -> index
     | [] -> 0
 
@@ -89,10 +87,7 @@ struct
 
   let send_append qupt index =
     let log, prev = List.split_while qupt.log ~f:(fun (i, _, _) -> i >= index) in
-    let prev_idx, prev_term = match List.hd prev with
-      | Some (index, term, _) -> index, term
-      | None -> 0,0
-    in
+    let prev_idx, prev_term = last_log_entry prev in
     make_rpc qupt (Append (prev_idx, prev_term, qupt.commit, log))
 
   let handle_timeout qupt =
@@ -146,6 +141,16 @@ struct
     let message = if valid_vote then VoteGranted else VoteDeclined in
     [Rpc (sender, make_rpc qupt message)], qupt
 
+  let apply_committed qupt =
+    List.drop_while qupt.log ~f:(fun (index, _, _) -> index > qupt.commit)
+    |> List.take_while ~f:(fun (index, _, _) -> index > qupt.last_applied)
+    |> List.fold_right
+      ~init:([], qupt.state)
+      ~f:(fun (index, _, command) (io, state) ->
+          let response, state = State.apply state command in
+          (Response (index, response)) :: io, state
+        )
+
   let handle_rpc (qupt:t) { sender; term; message } =
     let qupt = if term > qupt.term then { qupt with term} else qupt in
     let rpc, qupt = match message with
@@ -169,15 +174,8 @@ struct
       | VoteDeclined ->
         [], qupt
     in
-    let uncommitted = List.filter qupt.log ~f:(fun (index, _, _) ->
-        (index > qupt.last_applied) && (index <= qupt.commit)
-      )
-    in
-    let io, state = List.fold_right uncommitted ~init:(rpc, qupt.state) ~f:(fun (index, _, command) (io, state)  ->
-        let response, state = State.apply state command in
-        (Response (index, response)) :: io, state
-      ) in
-    io, { qupt with state; last_applied = qupt.commit }
+    let io, state = apply_committed qupt in
+    io @ rpc, { qupt with state; last_applied = qupt.commit }
 
   let handle_command (qupt:t) command =
     let index = (last_log_index qupt.log) + 1 in
