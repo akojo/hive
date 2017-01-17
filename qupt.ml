@@ -103,12 +103,12 @@ struct
   let handle_append (qupt:t) prev_idx prev_term commit log =
     let current_log = find_index qupt.log prev_idx prev_term in
     let message, qupt = if prev_idx <> 0 && List.is_empty current_log then
-        (AppendFailed qupt.commit), qupt
+        AppendFailed qupt.commit, qupt
       else
         let log = log @ current_log in
         let last = last_log_index log in
         let qupt = { qupt with log; commit = min last commit } in
-        AppendSuccess (last_log_index qupt.log), qupt
+        AppendSuccess last, qupt
     in
     { sender = qupt.self; term = qupt.term; message }, qupt
 
