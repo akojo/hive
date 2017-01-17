@@ -22,7 +22,7 @@ struct
     state: State.t;
     (* Persistent Qupt state *)
     term: int;
-    voted: string option;
+    voted: Id.t option;
     log: log_entry list;
     (* Volatile Qupt state *)
     commit: int;
@@ -102,7 +102,7 @@ struct
       in
       io, qupt
     else if qupt.role = Follower then
-      let qupt = { qupt with term = qupt.term + 1 } in
+      let qupt = { qupt with term = qupt.term + 1; voted = Some qupt.self } in
       let others = List.filter qupt.configuration ~f:((<>) qupt.self) in
       let io = List.map others ~f:(fun id ->
           let last_idx, last_term = last_log_entry qupt.log in
@@ -138,6 +138,18 @@ struct
     else
       qupt
 
+  let handle_vote qupt sender term vote =
+    let last_idx, last_term = last_log_entry qupt.log in
+    let valid_vote =
+      term >= qupt.term
+      && Option.value_map qupt.voted ~f:((=) sender) ~default:true
+      && vote.last_idx >= last_idx
+      && vote.last_term >= last_term
+    in
+    let message = if valid_vote then VoteGranted else VoteDeclined in
+    let response = { sender = qupt.self; term = qupt.term; message } in
+    [Rpc (sender, response)], qupt
+
   let handle_rpc (qupt:t) { sender; term; message } =
     let qupt = if term > qupt.term then { qupt with term} else qupt in
     let rpc, qupt = match message with
@@ -155,7 +167,8 @@ struct
           [], commit_if_majority { qupt with match_index; next_index } index
         else
           handle_timeout { qupt with match_index; next_index }
-      | Vote _
+      | Vote vote ->
+        handle_vote qupt sender term vote
       | VoteGranted
       | VoteDeclined ->
         [], qupt
