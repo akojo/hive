@@ -85,7 +85,9 @@ struct
     }
 
   let last_log_index log =
-    List.hd log |> Option.value_map ~f:(fun e -> e.index) ~default:0
+    match log with
+    | e :: _ -> e.index
+    | [] -> 0
 
   let find_index (log:log_entry list) term idx =
     List.drop_while log ~f:(fun el -> el.term <> term || el.index <> idx)
