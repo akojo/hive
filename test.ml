@@ -21,7 +21,7 @@ end
 module Test_qupt = Qupt.Make(Test_machine)(Int)
 
 let append ?(sender = 0) ?(term = 0) ?(prev_idx = 0) ?(prev_term = 0) ?(commit = 0) log =
-  Test_qupt.{ sender; term; message = Append { prev_idx; prev_term; log; commit }}
+  Test_qupt.{ sender; term; message = Append (prev_idx, prev_term, commit, log)}
 
 let response ?(sender = 1) ?(term = 0) message =
   Test_qupt.{ sender; term; message}
@@ -48,7 +48,7 @@ let leader_2 =
 
     "client command sends append rpc to followers" >:: test (fun _ ->
         let (req_id, io, _) = handle_command qupt 17 in
-        let expected = append [{ index = 1; term = 0; command = 17 }] in
+        let expected = append [(1, 0, 17 )] in
         assert_equal 1 req_id;
         assert_io [Rpc (1, expected)] io
       );
@@ -76,7 +76,7 @@ let leader_2 =
         let _, _, qupt = handle_command qupt 18 in
         let _, _, qupt = handle_command qupt 19 in
         let io, _ = handle_rpc qupt (response (AppendFailed 1)) in
-        let expected = [{index = 2; term = 0; command = 19 }] in
+        let expected = [(2, 0, 19)] in
         assert_io [Rpc (1, append ~prev_idx:1 expected)] io
       );
   ]
@@ -87,7 +87,7 @@ let leader_4 =
   "leader (4 nodes)" >::: [
     "client command sends append to all nodes" >:: test (fun _ ->
         let (_, io, _) = handle_command qupt 110 in
-        let expected = append [{ index = 1; term = 0; command = 110}] in
+        let expected = append [(1, 0, 110)] in
         assert_io [Rpc (1, expected); Rpc (2, expected); Rpc (3, expected)] io
       );
 
@@ -128,79 +128,60 @@ let follower_2 =
   let qupt = init 1 Follower [0;1] test_state in
   "follower (2 nodes)" >::: [
     "append into empty state returns success to leader" >:: test (fun _ ->
-        let rpc = append [{ index = 1; term = 0; command = 17 }] in
+        let rpc = append [(1, 0, 17)] in
         let (io, _) = handle_rpc qupt rpc in
         assert_io [Rpc (0, response (AppendSuccess 1))] io
       );
 
     "larger term increases term number" >:: test (fun _ ->
-        let rpc = append ~term:1 [{ index = 1; term = 1; command = 17 }] in
+        let rpc = append ~term:1 [(1, 1, 17)] in
         let (io, _) = handle_rpc qupt rpc in
         assert_io [Rpc (0, response ~term:1 (AppendSuccess 1))] io
       );
 
     "append with old term returns failure to leader" >:: test (fun _ ->
-        let rpc = append ~term:1 [{ index = 1; term = 0; command = 17 }] in
+        let rpc = append ~term:1 [(1, 0, 17)] in
         let (_, qupt) = handle_rpc qupt rpc in
-        let rpc = append [{ index = 1; term = 0; command = 18 }] in
+        let rpc = append [(1, 0, 18)] in
         let (io, _) = handle_rpc qupt rpc in
         assert_io [Rpc (0, response ~term:1 (AppendFailed 0))] io
       );
 
     "append returns failure when prev index not found" >:: test (fun _ ->
-        let rpc = append [{ index = 1; term = 0; command = 17 }] in
+        let rpc = append [(1, 0, 17)] in
         let (_, qupt) = handle_rpc qupt rpc in
-        let rpc = append ~prev_idx:2 [{ index = 3; term = 0; command = 18 }] in
+        let rpc = append ~prev_idx:2 [(3, 0, 18)] in
         let (io, _) = handle_rpc qupt rpc in
         assert_io [Rpc (0, response (AppendFailed 0))] io
       );
 
     "append failure returns last committed index" >:: test (fun _ ->
-        let rpc = append ~commit:1 [
-            { index = 4; term = 0; command = 20 };
-            { index = 3; term = 0; command = 19 };
-            { index = 1; term = 0; command = 18 };
-          ] in
+        let rpc = append ~commit:1 [(4, 0, 20); (3, 0, 19); (1, 0, 18)] in
         let (_, qupt) = handle_rpc qupt rpc in
-        let rpc = append ~prev_idx:2 [
-            { index = 4; term = 0; command = 20 }
-          ] in
+        let rpc = append ~prev_idx:2 [(4, 0, 20)] in
         let (io, _) = handle_rpc qupt rpc in
         assert_io [Rpc (0, response (AppendFailed 1))] io
       );
 
     "leader commit commits log" >:: test (fun state ->
-        let rpc = append ~commit:2 [
-            { index = 2; term = 0; command = 19 };
-            { index = 1; term = 0; command = 18 };
-          ] in
+        let rpc = append ~commit:2 [(2, 0, 19); (1, 0, 18)] in
         let _ = handle_rpc qupt rpc in
         assert_state [19; 18] state
       );
 
     "append removes entries not in leader log" >:: test (fun state ->
-        let rpc = append [
-            { index = 3; term = 0; command = 20 };
-            { index = 2; term = 0; command = 19 };
-            { index = 1; term = 0; command = 18 };
-          ] in
+        let rpc = append [(3, 0, 20); (2, 0, 19); (1, 0, 18)] in
         let (_, qupt) = handle_rpc qupt rpc in
-        let rpc = append ~commit:2 ~prev_idx:1 [
-            { index = 2; term = 0; command = 30 }
-          ] in
+        let rpc = append ~commit:2 ~prev_idx:1 [(2, 0, 30)] in
         let _ = handle_rpc qupt rpc in
         assert_state [30; 18] state
       );
 
     "append commits min(commit, last index)" >:: test (fun state ->
-        let rpc = append ~commit:3 [{ index = 1; term = 0; command = 100 }] in
+        let rpc = append ~commit:3 [(1, 0, 100)] in
         let (_, qupt) = handle_rpc qupt rpc in
         let () = assert_state [100] state in
-        let rpc = append ~commit:3 [
-            { index = 3; term = 0; command = 102 };
-            { index = 2; term = 0; command = 101 }
-          ]
-        in
+        let rpc = append ~commit:3 [(3, 0, 102); (2, 0, 101)] in
         let _ = handle_rpc qupt rpc in
         assert_state [102; 101; 100] state
       )

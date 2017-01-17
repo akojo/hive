@@ -27,18 +27,7 @@ sig
     | Follower
     | Candidate
 
-  type log_entry = {
-    index: int;
-    term: int;
-    command: command
-  } [@@deriving sexp]
-
-  type append = {
-    prev_idx: int;
-    prev_term: int;
-    log: log_entry list;
-    commit: int
-  } [@@deriving sexp]
+  type log_entry = int * int * command [@@deriving sexp]
 
   type vote = {
     last_idx: int;
@@ -46,7 +35,8 @@ sig
   } [@@deriving sexp]
 
   type message =
-    | Append of append
+    (* previous index, previous term, commit, log *)
+    | Append of int * int * int * log_entry list
     | AppendSuccess of int
     | AppendFailed of int
     | Vote of vote
