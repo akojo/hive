@@ -85,7 +85,6 @@ let do_io state messages =
         (match List.Assoc.find state.pending id with
          | Some addr ->
            let buf = Key_value_store.sexp_of_response response |> Sexp.to_string_hum in
-           let () = print_endline "send response" in
            ignore Unix.(sendto state.client_fd ~buf ~pos:0 ~len:(String.length buf) ~mode:[] ~addr)
          | None -> ()
         )
