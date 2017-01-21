@@ -29,6 +29,9 @@ let response ?(sender = 1) ?(term = 0) message =
 let vote ?(sender = 1) ?(term = 0) last_idx last_term =
   Test_qupt.{ sender; term; message = Vote { last_idx; last_term }}
 
+let vote_granted ?(sender = 1) ?(term = 0) () =
+  Test_qupt.{ sender; term; message = VoteGranted }
+
 let assert_io expected actual =
   let print_io io = [%sexp_of: Test_qupt.io list] io |> Sexp.to_string_hum in
   assert_equal ~printer:print_io expected actual
@@ -214,11 +217,57 @@ let follower_2 =
       );
   ]
 
+let candidate_4 =
+  let open Test_qupt in
+  let _, qupt = init false 0 [0;1;2;3] test_state |> handle_timeout in
+  "candidate (4 nodes)" >::: [
+    "minority does not convert to leader" >:: test (fun _ ->
+        let (io, _) = handle_rpc qupt (vote_granted ()) in
+        assert_io [] io
+      );
+
+    "majority converts to leader" >:: test (fun _ ->
+        let (_, qupt) = handle_rpc qupt (vote_granted ~sender:1 ()) in
+        let (io, _) = handle_rpc qupt (vote_granted ~sender:2 ()) in
+        let expected = [
+          Rpc (1, append ~term:1 []);
+          Rpc (2, append ~term:1 []);
+          Rpc (3, append ~term:1 []);
+        ]
+        in
+        assert_io expected io
+      );
+
+    "ignores duplicate votes" >:: test (fun _ ->
+        let (_, qupt) = handle_rpc qupt (vote_granted ~sender:1 ()) in
+        let (io, _) = handle_rpc qupt (vote_granted ~sender:1 ()) in
+        assert_io [] io
+      );
+
+    "append from new leader converts to follower" >:: test (fun _ ->
+        let io, _ = handle_rpc qupt (append ~term:1 ~sender:1 []) in
+        let response = response ~sender:0 ~term:1 (AppendResponse (true, 0)) in
+        assert_io [Rpc (1, response)] io
+      );
+
+    "timeout starts new election" >:: test (fun _ ->
+        let (io, _) = handle_timeout qupt in
+        let expected = [
+          Rpc (1, vote ~sender:0 ~term:2 0 0);
+          Rpc (2, vote ~sender:0 ~term:2 0 0);
+          Rpc (3, vote ~sender:0 ~term:2 0 0);
+        ]
+        in
+        assert_io expected io
+      );
+  ]
+
 let () =
   let tests = test_list [
       leader_2;
       leader_4;
-      follower_2
+      follower_2;
+      candidate_4
     ]
   in
   run_test_tt_main tests

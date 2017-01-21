@@ -31,7 +31,7 @@ struct
 
   type candidate_state = {
     qupt: qupt;
-    votes: int
+    votes: Id.t list;
   }
 
   type t =
@@ -118,6 +118,16 @@ struct
         let io, qupt = apply_committed qupt in
         Rpc (rpc.sender, response) :: io, qupt
 
+    let start_election (qupt:qupt) =
+      let qupt = { qupt with term = qupt.term + 1; voted = Some qupt.self } in
+      let others = List.filter qupt.configuration ~f:((<>) qupt.self) in
+      let io = List.map others ~f:(fun id ->
+          let last_idx, last_term = last_log_entry qupt.log in
+          Rpc (id, make_rpc qupt (Vote { last_idx; last_term }))
+        )
+      in
+      io, (Candidate { qupt; votes = [] })
+
     let handle_vote qupt rpc vote =
       let last_idx, last_term = last_log_entry qupt.log in
       let valid_vote =
@@ -132,7 +142,7 @@ struct
   module Leader = struct
     let init qupt =
       let followers = List.filter qupt.configuration ~f:((<>) qupt.self) in
-      Leader {
+      {
         qupt;
         next_index = List.map followers ~f:(fun id -> (id, 1));
         match_index = List.map followers ~f:(fun id -> (id, 0));
@@ -189,18 +199,7 @@ struct
   end
 
   module Follower = struct
-    let init qupt =
-      Follower qupt
-
-    let handle_timeout (qupt:qupt) =
-      let qupt = { qupt with term = qupt.term + 1; voted = Some qupt.self } in
-      let others = List.filter qupt.configuration ~f:((<>) qupt.self) in
-      let io = List.map others ~f:(fun id ->
-          let last_idx, last_term = Common.last_log_entry qupt.log in
-          Rpc (id, Common.make_rpc qupt (Vote { last_idx; last_term }))
-        )
-      in
-      io, (Candidate { qupt; votes = 0 })
+    let init qupt = qupt
 
     let handle_rpc (qupt:qupt) rpc =
       let io, qupt = match rpc.message with
@@ -217,27 +216,38 @@ struct
 
   module Candidate = struct
     let handle_rpc candidate rpc =
-      let rpc, qupt = match rpc.message with
-        | Append (prev_idx, prev_term, commit, log) ->
-          Common.handle_append candidate.qupt rpc prev_idx prev_term commit log
-        | Vote _
-        | AppendResponse _
-        | VoteGranted ->
-          [], candidate.qupt
-      in
-      rpc, Candidate { candidate with qupt }
+      match rpc.message with
+      | Append (prev_idx, prev_term, commit, log) ->
+        let io, qupt = Common.handle_append candidate.qupt rpc prev_idx prev_term commit log in
+        io, Follower qupt
+      | VoteGranted ->
+        let candidate = if List.mem candidate.votes rpc.sender then
+            candidate
+          else
+            { candidate with votes = rpc.sender :: candidate.votes }
+        in
+        let votes = List.length candidate.votes in
+        let nodes = List.length candidate.qupt.configuration in
+        if votes >= nodes / 2 then
+          let leader = Leader.init candidate.qupt in
+          Leader.handle_timeout leader
+        else
+          [], Candidate candidate
+      | Vote _
+      | AppendResponse _ ->
+        [], Candidate candidate
   end
 
   let init leader self configuration state =
     let qupt = Common.init self configuration state in
-    if leader then Leader.init qupt
-    else Follower.init qupt
+    if leader then Leader (Leader.init qupt)
+    else Follower (Follower.init qupt)
 
   let handle_timeout role =
     match role with
     | Leader leader  -> Leader.handle_timeout leader
-    | Follower qupt -> Follower.handle_timeout qupt
-    | Candidate _ -> [], role
+    | Follower qupt -> Common.start_election qupt
+    | Candidate candidate -> Common.start_election candidate.qupt
 
   let handle_rpc role message =
     let qupt_of = function
