@@ -196,9 +196,7 @@ struct
             [], leader
           else
             [Rpc (sender, send_append leader.qupt (index + 1))], leader
-        | Vote vote ->
-          let io = handle_vote leader.qupt sender term vote in
-          io, leader
+        | Vote vote -> (handle_vote leader.qupt sender term vote), leader
         | Append _
         | VoteGranted ->
           [], leader
@@ -213,9 +211,7 @@ struct
           else
             let resp, qupt = handle_append qupt prev_idx prev_term commit log in
             [Rpc (sender, resp)], qupt
-        | Vote vote ->
-          let io = handle_vote qupt sender term vote in
-          io, qupt
+        | Vote vote -> (handle_vote qupt sender term vote), qupt
         | AppendResponse _
         | VoteGranted ->
           [], qupt
