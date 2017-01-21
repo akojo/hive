@@ -124,7 +124,8 @@ let run zoku_port client_port leader bind_to name configuration () =
   in
   let rec loop state =
     let read_fds = [state.zoku_fd; state.client_fd] in
-    let timeout = `After (Time_ns.Span.of_sec 1.0) in
+    let span = Zoku.timeout state.qupt in
+    let timeout = `After (Time_ns.Span.of_sec span) in
     let fds = Unix.select ~read:read_fds ~write:[] ~except:[] ~timeout () in
     let open Unix.Select_fds in
     if List.length fds.read = 0 then

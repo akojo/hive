@@ -243,6 +243,15 @@ struct
     if leader then Leader (Leader.init qupt)
     else Follower (Follower.init qupt)
 
+  let timeout role =
+    let base = 1.0 in
+    let timeout = match role with
+      | Leader _ -> base
+      | Follower _
+      | Candidate _ -> 10.0 *. base
+    in
+    timeout +. Random.float timeout
+
   let handle_timeout role =
     match role with
     | Leader leader  -> Leader.handle_timeout leader

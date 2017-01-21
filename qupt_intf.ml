@@ -49,6 +49,7 @@ sig
   [@@deriving sexp]
 
   val init: bool -> id -> id list -> state -> t
+  val timeout: t -> float
   val handle_timeout: t -> io list * t
   val handle_rpc: t -> rpc -> io list * t
   val handle_command: t -> command -> int * io list * t
