@@ -79,10 +79,6 @@ struct
       | (index, term, _) :: _ -> index, term
       | [] -> 0, 0
 
-    let last_log_index = function
-      | (index, _, _) :: _ -> index
-      | [] -> 0
-
     let find_index (log:log_entry list) index term =
       List.drop_while log ~f:(fun (i, t, _) -> i <> index || t  <> term)
 
@@ -105,27 +101,32 @@ struct
       in
       io, { qupt with state; last_applied = qupt.commit }
 
-    let handle_append qupt prev_idx prev_term commit log =
-      let current_log = find_index qupt.log prev_idx prev_term in
-      let message, qupt = if prev_idx <> 0 && List.is_empty current_log then
-          AppendResponse (false, qupt.commit), qupt
-        else
-          let log = log @ current_log in
-          let last = last_log_index log in
-          let qupt = { qupt with log; commit = min last commit } in
-          AppendResponse (true, last), qupt
-      in
-      make_rpc qupt message, qupt
+    let handle_append (qupt:qupt) rpc prev_idx prev_term commit log =
+      if rpc.term < qupt.term then
+        [Rpc (rpc.sender, make_rpc qupt (AppendResponse (false, 0)))], qupt
+      else
+        let current_log = find_index qupt.log prev_idx prev_term in
+        let message, qupt = if prev_idx <> 0 && List.is_empty current_log then
+            AppendResponse (false, qupt.commit), qupt
+          else
+            let log = log @ current_log in
+            let last, _ = last_log_entry log in
+            let qupt = { qupt with log; commit = min last commit } in
+            AppendResponse (true, last), qupt
+        in
+        let response = make_rpc qupt message in
+        let io, qupt = apply_committed qupt in
+        Rpc (rpc.sender, response) :: io, qupt
 
-    let handle_vote qupt sender term vote =
+    let handle_vote qupt rpc vote =
       let last_idx, last_term = last_log_entry qupt.log in
       let valid_vote =
-        term >= qupt.term
-        && Option.value_map qupt.voted ~f:((=) sender) ~default:true
+        rpc.term >= qupt.term
+        && Option.value_map qupt.voted ~f:((=) rpc.sender) ~default:true
         && vote.last_idx >= last_idx
         && vote.last_term >= last_term
       in
-      if valid_vote then [Rpc (sender, make_rpc qupt VoteGranted)] else []
+      if valid_vote then [Rpc (rpc.sender, make_rpc qupt VoteGranted)] else []
   end
 
   module Leader = struct
@@ -159,28 +160,28 @@ struct
       in
       io, Leader leader
 
-    let handle_rpc leader {sender; term; message} =
-      let rpc, leader = match message with
+    let handle_rpc leader rpc =
+      let io, leader = match rpc.message with
         | AppendResponse (success, index) ->
-          let next_index = List.Assoc.add leader.next_index sender (index + 1) in
-          let match_index = List.Assoc.add leader.match_index sender index in
+          let next_index = List.Assoc.add leader.next_index rpc.sender (index + 1) in
+          let match_index = List.Assoc.add leader.match_index rpc.sender index in
           let leader = { leader with match_index; next_index } in
           if success then
             let leader = commit_if_majority leader index in
-            [], leader
+            let io, qupt = Common.apply_committed leader.qupt in
+            io, { leader with qupt }
           else
-            [Rpc (sender, send_append leader.qupt (index + 1))], leader
+            [Rpc (rpc.sender, send_append leader.qupt (index + 1))], leader
         | Vote vote ->
-          (Common.handle_vote leader.qupt sender term vote), leader
+          Common.handle_vote leader.qupt rpc vote, leader
         | Append _
         | VoteGranted ->
           [], leader
       in
-      let io, qupt = Common.apply_committed leader.qupt in
-      io @ rpc, Leader { leader with qupt }
+      io, Leader leader
 
     let handle_command (leader:leader_state) command =
-      let index = (Common.last_log_index leader.qupt.log) + 1 in
+      let index = fst (Common.last_log_entry leader.qupt.log) + 1 in
       let log = (index, leader.qupt.term, command) :: leader.qupt.log in
       let qupt = { leader.qupt with log } in
       let io, role = handle_timeout { leader with qupt } in
@@ -201,33 +202,24 @@ struct
       in
       io, (Candidate { qupt; votes = 0 })
 
-    let handle_rpc (qupt:qupt) { sender; term; message } =
-      let rpc, qupt = match message with
+    let handle_rpc (qupt:qupt) rpc =
+      let io, qupt = match rpc.message with
         | Append (prev_idx, prev_term, commit, log) ->
-          if term < qupt.term then
-            [Rpc (sender, Common.make_rpc qupt (AppendResponse (false, 0)))], qupt
-          else
-            let resp, qupt = Common.handle_append qupt prev_idx prev_term commit log in
-            [Rpc (sender, resp)], qupt
-        | Vote vote -> (Common.handle_vote qupt sender term vote), qupt
+          Common.handle_append qupt rpc prev_idx prev_term commit log
+        | Vote vote ->
+          Common.handle_vote qupt rpc vote, qupt
         | AppendResponse _
         | VoteGranted ->
           [], qupt
       in
-      let io, qupt = Common.apply_committed qupt in
-      io @ rpc, Follower qupt
+      io, Follower qupt
   end
 
   module Candidate = struct
-    let handle_rpc candidate { sender; term; message } =
-      let rpc, qupt = match message with
+    let handle_rpc candidate rpc =
+      let rpc, qupt = match rpc.message with
         | Append (prev_idx, prev_term, commit, log) ->
-          let qupt = candidate.qupt in
-          if term < qupt.term then
-            [Rpc (sender, Common.make_rpc qupt (AppendResponse (false, 0)))], qupt
-          else
-            let resp, qupt = Common.handle_append qupt prev_idx prev_term commit log in
-            [Rpc (sender, resp)], qupt
+          Common.handle_append candidate.qupt rpc prev_idx prev_term commit log
         | Vote _
         | AppendResponse _
         | VoteGranted ->
@@ -248,17 +240,18 @@ struct
     | Candidate _ -> [], role
 
   let handle_rpc role message =
-    let maybe_convert_to_follower role term =
-      let convert (qupt:qupt) =
-        if term > qupt.term then Follower { qupt with term } else role
-      in
-      match role with
-      | Leader leader -> convert leader.qupt
-      | Follower qupt -> convert qupt
-      | Candidate candidate -> convert candidate.qupt
+    let qupt_of = function
+      | Leader leader -> leader.qupt
+      | Follower qupt -> qupt
+      | Candidate candidate -> candidate.qupt
     in
-    let role = maybe_convert_to_follower role message.term in
-    match role with
+    let maybe_convert (qupt:qupt) =
+      if message.term > qupt.term then
+        Follower { qupt with term = message.term }
+      else
+        role
+    in
+    match maybe_convert (qupt_of role) with
     | Leader leader -> Leader.handle_rpc leader message
     | Follower qupt -> Follower.handle_rpc qupt message
     | Candidate candidate -> Candidate.handle_rpc candidate message
