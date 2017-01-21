@@ -23,13 +23,13 @@ module Key_value_store = struct
       { key; value = Map.find store key }, store
 end
 
-module Zoku = Qupt.Make(Key_value_store)(Int64)
+module Zoku = Qupt.Make(Key_value_store)(String)
 
 type ext_config = {
-  hosts: (Unix.Inet_addr.Blocking_sexp.t * int) list
+  hosts: (string * Unix.Inet_addr.Blocking_sexp.t * int) list
 } [@@deriving sexp]
 
-type cluster = Unix.sockaddr_blocking_sexp Int64.Map.t [@@deriving sexp]
+type cluster = Unix.sockaddr_blocking_sexp String.Map.t [@@deriving sexp]
 
 type server_state = {
   zoku_fd: Unix.File_descr.t;
@@ -56,22 +56,19 @@ let parse_sexp buf convf fd addr =
     None
 
 let read_configuration localhost ext_config =
-  let make_id addr port =
-    Int64.(shift_left (of_int32 (Unix.Inet_addr.inet4_addr_to_int32_exn addr)) 32 |> bit_or (of_int port))
-  in
   let cluster = match ext_config with
     | Some ext_config ->
       let conf = Sexp.of_string ext_config |> ext_config_of_sexp in
-      List.fold_left (localhost :: conf.hosts) ~init:Int64.Map.empty ~f:(fun hosts (addr, port) ->
-          let sockaddr = Unix.ADDR_INET (addr, port) in
-          let index = make_id addr port in
-          Map.add hosts ~key:index ~data:sockaddr
-        )
-    | None -> Int64.Map.empty
+      List.fold_left (localhost :: conf.hosts)
+        ~init:String.Map.empty
+        ~f:(fun hosts (name, addr, port) ->
+            let sockaddr = Unix.ADDR_INET (addr, port) in
+            Map.add hosts ~key:name ~data:sockaddr
+          )
+    | None -> String.Map.empty
   in
   let () = sexp_of_cluster cluster |> Sexp.to_string_hum |> print_endline in
-  let (localaddr, localport) = localhost in
-  make_id localaddr localport, cluster
+  cluster
 
 let do_io state messages =
   let cluster = state.cluster in
@@ -95,10 +92,14 @@ let handle_timeout state =
   let () = do_io state messages in
   { state with qupt }
 
-let run zoku_port client_port leader bind_to configuration () =
+let run zoku_port client_port leader bind_to name configuration () =
   let bind_addr = match bind_to with
     | Some addr -> Unix.Inet_addr.of_string addr
     | None -> Unix.Inet_addr.bind_any
+  in
+  let myname = match name with
+    | Some name -> name
+    | None -> Unix.gethostname ()
   in
   let buf = String.create 65536 in
   let handle_read state fd =
@@ -133,10 +134,10 @@ let run zoku_port client_port leader bind_to configuration () =
   in
   let zoku_fd = bind_socket bind_addr zoku_port in
   let client_fd = bind_socket bind_addr client_port in
-  let self, cluster = read_configuration (bind_addr, zoku_port) configuration in
+  let cluster = read_configuration (myname, bind_addr, zoku_port) configuration in
   let role = if leader then Zoku.Leader else Zoku.Follower in
   let ids = Map.keys cluster in
-  let qupt = Zoku.init self role ids Key_value_store.empty in
+  let qupt = Zoku.init myname role ids Key_value_store.empty in
   loop { zoku_fd; client_fd; qupt; cluster; pending = [] }
 
 let () = Command.run
@@ -148,6 +149,7 @@ let () = Command.run
          +> flag "-p" (optional_with_default 2360 int) ~doc:"port client port (default 2360)"
          +> flag "-L" no_arg ~doc:"start as a leader"
          +> flag "-b" (optional string) ~doc:"address ip addres to bind to (default 0.0.0.0)"
+         +> flag "-n" (optional string) ~doc:"node name (default hostname)"
          +> flag "-c" (optional string) ~doc:"configuration"
        )
        run
