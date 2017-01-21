@@ -147,11 +147,11 @@ let () = Command.run
          empty
          +> flag "-P" (optional_with_default 7383 int) ~doc:"port zoku port (default 7383)"
          +> flag "-p" (optional_with_default 2360 int) ~doc:"port client port (default 2360)"
-         +> flag "-L" no_arg ~doc:"start as a leader"
+         +> flag "-L" no_arg ~doc:" start as a leader"
          +> flag "-b" (optional string) ~doc:"address ip addres to bind to (default 0.0.0.0)"
-         +> flag "-n" (optional string) ~doc:"node name (default hostname)"
-         +> flag "-t" (optional_with_default 0.1 float) ~doc:"heartbeat interval (default 100 ms)"
-         +> flag "-c" (optional string) ~doc:"configuration"
+         +> flag "-n" (optional string) ~doc:"name node name (default hostname)"
+         +> flag "-t" (optional_with_default 0.1 float) ~doc:"time heartbeat interval (default 100 ms)"
+         +> flag "-c" (optional string) ~doc:"configuration configuration"
        )
        run
     )
