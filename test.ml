@@ -197,7 +197,7 @@ let follower_2 =
     "decline vote if already voted for self" >:: (fun _ ->
         let _, qupt = handle_timeout qupt in
         let io, _ = handle_rpc qupt (vote ~sender:0 ~term:1 0 0) in
-        assert_io [Rpc (0, response ~term:1 VoteDeclined)] io
+        assert_io [] io
       );
 
     "grant vote if candidate log up-to-date" >:: (fun _ ->
@@ -210,7 +210,7 @@ let follower_2 =
     "decline vote if term < current term" >:: (fun _ ->
         let _, qupt = handle_rpc qupt (append ~term:2 []) in
         let io, _ = handle_rpc qupt (vote ~sender:0 ~term:1 3 0) in
-        assert_io [Rpc (0, response ~term:2 VoteDeclined)] io
+        assert_io [] io
       );
   ]
 

@@ -35,7 +35,6 @@ sig
     | AppendResponse of bool * int
     | Vote of vote
     | VoteGranted
-    | VoteDeclined
   [@@deriving sexp]
 
   type rpc = {

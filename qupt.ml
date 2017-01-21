@@ -49,7 +49,6 @@ struct
     | AppendResponse of bool * int
     | Vote of vote
     | VoteGranted
-    | VoteDeclined
   [@@deriving sexp]
 
   type rpc = {
@@ -159,8 +158,7 @@ struct
       && vote.last_idx >= last_idx
       && vote.last_term >= last_term
     in
-    let message = if valid_vote then VoteGranted else VoteDeclined in
-    [Rpc (sender, make_rpc qupt message)]
+    if valid_vote then [Rpc (sender, make_rpc qupt VoteGranted)] else []
 
   let apply_committed qupt =
     let io, state =
@@ -202,8 +200,7 @@ struct
           let io = handle_vote leader.qupt sender term vote in
           io, leader
         | Append _
-        | VoteGranted
-        | VoteDeclined ->
+        | VoteGranted ->
           [], leader
       in
       let io, qupt = apply_committed leader.qupt in
@@ -220,8 +217,7 @@ struct
           let io = handle_vote qupt sender term vote in
           io, qupt
         | AppendResponse _
-        | VoteGranted
-        | VoteDeclined ->
+        | VoteGranted ->
           [], qupt
       in
       let io, qupt = apply_committed qupt in
@@ -235,12 +231,9 @@ struct
           else
             let resp, qupt = handle_append qupt prev_idx prev_term commit log in
             [Rpc (sender, resp)], qupt
-        | Vote vote ->
-          let io = handle_vote candidate.qupt sender term vote in
-          io, candidate.qupt
+        | Vote _
         | AppendResponse _
-        | VoteGranted
-        | VoteDeclined ->
+        | VoteGranted ->
           [], candidate.qupt
       in
       rpc, Candidate { candidate with qupt }
