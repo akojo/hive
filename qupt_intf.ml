@@ -48,7 +48,7 @@ sig
     | Response of int * response
   [@@deriving sexp]
 
-  val init: bool -> id -> id list -> state -> t
+  val init: bool -> id -> id list -> state -> float -> t
   val timeout: t -> float
   val handle_timeout: t -> io list * t
   val handle_rpc: t -> rpc -> io list * t

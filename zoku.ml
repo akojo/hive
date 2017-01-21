@@ -92,7 +92,7 @@ let handle_timeout state =
   let () = do_io state messages in
   { state with qupt }
 
-let run zoku_port client_port leader bind_to name configuration () =
+let run zoku_port client_port leader bind_to name heartbeat configuration () =
   let bind_addr = match bind_to with
     | Some addr -> Unix.Inet_addr.of_string addr
     | None -> Unix.Inet_addr.bind_any
@@ -137,7 +137,7 @@ let run zoku_port client_port leader bind_to name configuration () =
   let client_fd = bind_socket bind_addr client_port in
   let cluster = read_configuration (myname, bind_addr, zoku_port) configuration in
   let ids = Map.keys cluster in
-  let qupt = Zoku.init leader myname ids Key_value_store.empty in
+  let qupt = Zoku.init leader myname ids Key_value_store.empty heartbeat in
   loop { zoku_fd; client_fd; qupt; cluster; pending = [] }
 
 let () = Command.run
@@ -150,6 +150,7 @@ let () = Command.run
          +> flag "-L" no_arg ~doc:"start as a leader"
          +> flag "-b" (optional string) ~doc:"address ip addres to bind to (default 0.0.0.0)"
          +> flag "-n" (optional string) ~doc:"node name (default hostname)"
+         +> flag "-t" (optional_with_default 0.1 float) ~doc:"heartbeat interval (default 100 ms)"
          +> flag "-c" (optional string) ~doc:"configuration"
        )
        run

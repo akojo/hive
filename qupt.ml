@@ -14,6 +14,7 @@ struct
     self: Id.t;
     configuration: Id.t list;
     state: State.t;
+    heartbeat: float;
     (* Persistent Qupt state *)
     term: int;
     voted: Id.t option;
@@ -63,11 +64,12 @@ struct
   [@@deriving sexp]
 
   module Common = struct
-    let init self configuration state =
+    let init self configuration state heartbeat =
       {
         self;
         configuration;
         state;
+        heartbeat;
         term = 0;
         voted = None;
         log = [];
@@ -238,17 +240,16 @@ struct
         [], Candidate candidate
   end
 
-  let init leader self configuration state =
-    let qupt = Common.init self configuration state in
+  let init leader self configuration state heartbeat =
+    let qupt = Common.init self configuration state heartbeat in
     if leader then Leader (Leader.init qupt)
     else Follower (Follower.init qupt)
 
   let timeout role =
-    let base = 1.0 in
     let timeout = match role with
-      | Leader _ -> base
-      | Follower _
-      | Candidate _ -> 10.0 *. base
+      | Leader leader -> leader.qupt.heartbeat
+      | Follower qupt -> 10.0 *. qupt.heartbeat
+      | Candidate candidate -> 10.0 *. candidate.qupt.heartbeat
     in
     timeout +. Random.float timeout
 
