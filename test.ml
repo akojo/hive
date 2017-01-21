@@ -260,6 +260,21 @@ let candidate_4 =
         in
         assert_io expected io
       );
+
+    "leader heartbeats start from last log index + 1" >:: test (fun _ ->
+        let log = [(3, 1, 102); (2, 1, 101); (1, 1, 100);] in
+        let _, qupt = handle_rpc qupt (append ~term:1 ~sender:1 log) in
+        let _, qupt = handle_timeout qupt in
+        let _, qupt = handle_rpc qupt (vote_granted ~sender:1 ()) in
+        let io, _ = handle_rpc qupt (vote_granted ~sender:2 ()) in
+        let expected = [
+          Rpc (1, append ~term:2 ~prev_idx:3 ~prev_term:1 []);
+          Rpc (2, append ~term:2 ~prev_idx:3 ~prev_term:1 []);
+          Rpc (3, append ~term:2 ~prev_idx:3 ~prev_term:1 []);
+        ]
+        in
+        assert_io expected io
+      );
   ]
 
 let () =

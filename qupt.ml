@@ -142,9 +142,10 @@ struct
   module Leader = struct
     let init qupt =
       let followers = List.filter qupt.configuration ~f:((<>) qupt.self) in
+      let index, _ = Common.last_log_entry qupt.log in
       {
         qupt;
-        next_index = List.map followers ~f:(fun id -> (id, 1));
+        next_index = List.map followers ~f:(fun id -> (id, index + 1));
         match_index = List.map followers ~f:(fun id -> (id, 0));
       }
 
@@ -229,8 +230,7 @@ struct
         let votes = List.length candidate.votes in
         let nodes = List.length candidate.qupt.configuration in
         if votes >= nodes / 2 then
-          let leader = Leader.init candidate.qupt in
-          Leader.handle_timeout leader
+          Leader.handle_timeout (Leader.init candidate.qupt)
         else
           [], Candidate candidate
       | Vote _
