@@ -42,7 +42,7 @@ let test f _ =
 
 let leader_2 =
   let open Test_qupt in
-  let qupt = init 0 Leader [0;1] test_state in
+  let qupt = init true 0 [0;1] test_state in
   "leader (2 nodes)" >::: [
     "timeout sends heartbeat to followers" >:: test (fun _ ->
         let (io, _) = handle_timeout qupt in
@@ -86,7 +86,7 @@ let leader_2 =
 
 let leader_4 =
   let open Test_qupt in
-  let qupt = init 0 Leader [0;1;2;3] test_state in
+  let qupt = init true 0 [0;1;2;3] test_state in
   "leader (4 nodes)" >::: [
     "client command sends append to all nodes" >:: test (fun _ ->
         let (_, io, _) = handle_command qupt 110 in
@@ -128,7 +128,7 @@ let leader_4 =
 
 let follower_2 =
   let open Test_qupt in
-  let qupt = init 1 Follower [0;1] test_state in
+  let qupt = init false 1 [0;1] test_state in
   "follower (2 nodes)" >::: [
     "append into empty state returns success to leader" >:: test (fun _ ->
         let rpc = append [(1, 0, 17)] in

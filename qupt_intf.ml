@@ -22,11 +22,6 @@ sig
   type response
   type state
 
-  type role =
-    | Leader
-    | Follower
-    | Candidate
-
   type log_entry = int * int * command [@@deriving sexp]
 
   type vote = {
@@ -54,7 +49,7 @@ sig
     | Response of int * response
   [@@deriving sexp]
 
-  val init: id -> role -> id list -> state -> t
+  val init: bool -> id -> id list -> state -> t
   val handle_timeout: t -> io list * t
   val handle_rpc: t -> rpc -> io list * t
   val handle_command: t -> command -> int * io list * t

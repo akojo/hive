@@ -135,9 +135,8 @@ let run zoku_port client_port leader bind_to name configuration () =
   let zoku_fd = bind_socket bind_addr zoku_port in
   let client_fd = bind_socket bind_addr client_port in
   let cluster = read_configuration (myname, bind_addr, zoku_port) configuration in
-  let role = if leader then Zoku.Leader else Zoku.Follower in
   let ids = Map.keys cluster in
-  let qupt = Zoku.init myname role ids Key_value_store.empty in
+  let qupt = Zoku.init leader myname ids Key_value_store.empty in
   loop { zoku_fd; client_fd; qupt; cluster; pending = [] }
 
 let () = Command.run
