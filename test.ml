@@ -45,7 +45,7 @@ let test f _ =
 
 let leader_2 =
   let open Test_qupt in
-  let qupt = init true 0 [0;1] test_state in
+  let qupt = init true 0 [0;1] test_state 1.0 in
   "leader (2 nodes)" >::: [
     "timeout sends heartbeat to followers" >:: test (fun _ ->
         let (io, _) = handle_timeout qupt in
@@ -89,7 +89,7 @@ let leader_2 =
 
 let leader_4 =
   let open Test_qupt in
-  let qupt = init true 0 [0;1;2;3] test_state in
+  let qupt = init true 0 [0;1;2;3] test_state 1.0 in
   "leader (4 nodes)" >::: [
     "client command sends append to all nodes" >:: test (fun _ ->
         let (_, io, _) = handle_command qupt 110 in
@@ -131,7 +131,7 @@ let leader_4 =
 
 let follower_2 =
   let open Test_qupt in
-  let qupt = init false 1 [0;1] test_state in
+  let qupt = init false 1 [0;1] test_state 1.0 in
   "follower (2 nodes)" >::: [
     "append into empty state returns success to leader" >:: test (fun _ ->
         let rpc = append [(1, 0, 17)] in
@@ -219,7 +219,7 @@ let follower_2 =
 
 let candidate_4 =
   let open Test_qupt in
-  let _, qupt = init false 0 [0;1;2;3] test_state |> handle_timeout in
+  let _, qupt = init false 0 [0;1;2;3] test_state 1.0 |> handle_timeout in
   "candidate (4 nodes)" >::: [
     "minority does not convert to leader" >:: test (fun _ ->
         let (io, _) = handle_rpc qupt (vote_granted ()) in
@@ -244,10 +244,21 @@ let candidate_4 =
         assert_io [] io
       );
 
+    "vote from later term converts to follower" >:: test (fun _ ->
+        let io, _ = handle_rpc qupt (vote ~sender:1 ~term:2 0 0) in
+        assert_io [Rpc (1, response ~sender:0 ~term:2 VoteGranted)] io
+      );
+
     "append from new leader converts to follower" >:: test (fun _ ->
         let io, _ = handle_rpc qupt (append ~term:1 ~sender:1 []) in
         let response = response ~sender:0 ~term:1 (AppendResponse (true, 0)) in
         assert_io [Rpc (1, response)] io
+      );
+
+    "append from new leader doesn't invalidate existing vote" >:: test (fun _ ->
+        let _, qupt = handle_rpc qupt (append ~term:1 ~sender:1 []) in
+        let io, _ = handle_rpc qupt (vote ~sender:1 ~term:1 0 0) in
+        assert_io [] io
       );
 
     "timeout starts new election" >:: test (fun _ ->

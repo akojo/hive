@@ -265,13 +265,13 @@ struct
       | Follower qupt -> qupt
       | Candidate candidate -> candidate.qupt
     in
-    let maybe_convert (qupt:qupt) =
+    let maybe_convert_to_follower (qupt:qupt) =
       if message.term > qupt.term then
-        Follower { qupt with term = message.term }
+        Follower { qupt with term = message.term; voted = None }
       else
         role
     in
-    match maybe_convert (qupt_of role) with
+    match maybe_convert_to_follower (qupt_of role) with
     | Leader leader -> Leader.handle_rpc leader message
     | Follower qupt -> Follower.handle_rpc qupt message
     | Candidate candidate -> Candidate.handle_rpc candidate message
