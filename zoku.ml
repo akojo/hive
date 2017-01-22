@@ -125,7 +125,7 @@ let run zoku_port client_port leader bind_to name heartbeat configuration () =
   let rec loop state =
     let read_fds = [state.zoku_fd; state.client_fd] in
     let span = Zoku.timeout state.qupt in
-    let timeout = `After (Time_ns.Span.of_sec span) in
+    let timeout = `After (Time_ns.Span.of_ms span) in
     let fds = Unix.select ~read:read_fds ~write:[] ~except:[] ~timeout () in
     let open Unix.Select_fds in
     if List.length fds.read = 0 then
@@ -150,7 +150,7 @@ let () = Command.run
          +> flag "-L" no_arg ~doc:" start as a leader"
          +> flag "-b" (optional string) ~doc:"address ip addres to bind to (default 0.0.0.0)"
          +> flag "-n" (optional string) ~doc:"name node name (default hostname)"
-         +> flag "-t" (optional_with_default 0.1 float) ~doc:"time heartbeat interval (default 100 ms)"
+         +> flag "-t" (optional_with_default 100.0 float) ~doc:"milliseconds heartbeat interval (default 100 ms)"
          +> flag "-c" (optional string) ~doc:"configuration configuration"
        )
        run
