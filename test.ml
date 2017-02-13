@@ -210,6 +210,18 @@ let follower_2 =
         assert_io [Rpc (0, response ~term:1 VoteGranted)] io
       );
 
+    "grant vote if already voted for candidate" >:: (fun _ ->
+        let _, qupt = handle_rpc qupt (vote ~sender:0 ~term:1 3 0) in
+        let io, _ = handle_rpc qupt (vote ~sender:0 ~term:1 3 0) in
+        assert_io [Rpc (0, response ~term:1 VoteGranted)] io
+      );
+
+    "decline vote if already voted for someone else" >:: (fun _ ->
+        let _, qupt = handle_rpc qupt (vote ~sender:0 ~term:1 3 0) in
+        let io, _ = handle_rpc qupt (vote ~sender:1 ~term:1 3 0) in
+        assert_io [] io
+      );
+
     "decline vote if term < current term" >:: (fun _ ->
         let _, qupt = handle_rpc qupt (append ~term:2 []) in
         let io, _ = handle_rpc qupt (vote ~sender:0 ~term:1 3 0) in
