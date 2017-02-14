@@ -21,8 +21,11 @@ sig
   type command
   type response
   type state
-
-  type log_entry = int * int * command [@@deriving sexp]
+  type log_entry = {
+    index: int;
+    term: int;
+    command: command;
+  }
 
   type vote = {
     last_idx: int;

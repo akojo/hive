@@ -23,7 +23,9 @@ module Key_value_store = struct
       { key; value = Map.find store key }, store
 end
 
-module Zoku = Qupt.Make(Key_value_store)(String)
+module Log = Log_memory.Make(Key_value_store)
+
+module Zoku = Qupt.Make(Key_value_store)(String)(Log)
 
 type ext_config = {
   hosts: (string * Unix.Inet_addr.Blocking_sexp.t * int) list

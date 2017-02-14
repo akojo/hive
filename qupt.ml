@@ -1,15 +1,17 @@
 open Core.Std
 
 include Qupt_intf
+include Log_intf
 
-module Make (State : State_machine) (Id: Id)
+module Make (State : State_machine) (Id: Id) (Log: sig
+    include Log_intf.Log with type command := State.command
+  end)
   : S with type state := State.t
        and type command := State.command
        and type response := State.response
+       and type log_entry := Log.entry
        and type id := Id.t =
 struct
-  type log_entry = int * int * State.command [@@deriving sexp]
-
   type qupt = {
     self: Id.t;
     configuration: Id.t list;
@@ -18,7 +20,7 @@ struct
     (* Persistent Qupt state *)
     term: int;
     voted: Id.t option;
-    log: log_entry list;
+    log: Log.t;
     (* Volatile Qupt state *)
     commit: int;
     last_applied: int;
@@ -46,7 +48,7 @@ struct
   } [@@deriving sexp]
 
   type message =
-    | Append of int * int * int * log_entry list
+    | Append of int * int * int * Log.entry list
     | AppendResponse of bool * int
     | Vote of vote
     | VoteGranted
@@ -72,17 +74,15 @@ struct
         heartbeat;
         term = 0;
         voted = None;
-        log = [];
+        log = Log.empty;
         commit = 0;
         last_applied = 0;
       }
 
-    let last_log_entry = function
-      | (index, term, _) :: _ -> index, term
-      | [] -> 0, 0
-
-    let find_index (log:log_entry list) index term =
-      List.drop_while log ~f:(fun (i, t, _) -> i <> index || t  <> term)
+    let last_log_entry log =
+      match Log.last log with
+      | Some entry -> entry.Log.index, entry.Log.term
+      | None -> 0, 0
 
     let make_rpc qupt message = {
       sender = qupt.self;
@@ -92,33 +92,34 @@ struct
 
     let apply_committed qupt =
       let io, state =
-        List.drop_while qupt.log ~f:(fun (index, _, _) -> index > qupt.commit)
-        |> List.take_while ~f:(fun (index, _, _) -> index > qupt.last_applied)
+        Log.range qupt.log ~first:qupt.last_applied ~last:qupt.commit
         |> List.fold_right
           ~init:([], qupt.state)
-          ~f:(fun (index, _, command) (io, state) ->
-              let response, state = State.apply state command in
-              (Response (index, response)) :: io, state
+          ~f:(fun entry (io, state) ->
+              let response, state = State.apply state entry.Log.command in
+              (Response (entry.Log.index, response)) :: io, state
             )
       in
       io, { qupt with state; last_applied = qupt.commit }
 
     let handle_append (qupt:qupt) rpc prev_idx prev_term commit log =
+      let append qupt log =
+        let log = Log.append_after ~index:prev_idx ~entries:log qupt.log in
+        let last_index, _ = last_log_entry log in
+        let qupt = { qupt with log; commit = min last_index commit } in
+        AppendResponse (true, last_index), qupt
+      in
       if rpc.term < qupt.term then
         [Rpc (rpc.sender, make_rpc qupt (AppendResponse (false, 0)))], qupt
       else
-        let current_log = find_index qupt.log prev_idx prev_term in
-        let message, qupt = if prev_idx <> 0 && List.is_empty current_log then
-            AppendResponse (false, qupt.commit), qupt
-          else
-            let log = log @ current_log in
-            let last, _ = last_log_entry log in
-            let qupt = { qupt with log; commit = min last commit } in
-            AppendResponse (true, last), qupt
+        let message, qupt =
+          match Log.find ~index:prev_idx qupt.log with
+          | Some entry when entry.term = prev_term -> append qupt log
+          | None when Log.is_empty qupt.log -> append qupt log
+          | _ -> AppendResponse (false, qupt.commit), qupt
         in
-        let response = make_rpc qupt message in
         let io, qupt = apply_committed qupt in
-        Rpc (rpc.sender, response) :: io, qupt
+        Rpc (rpc.sender, make_rpc qupt message) :: io, qupt
 
     let start_election (qupt:qupt) =
       let qupt = { qupt with term = qupt.term + 1; voted = Some qupt.self } in
@@ -142,18 +143,21 @@ struct
       }
 
     let send_append qupt index =
-      let log, prev = List.split_while qupt.log ~f:(fun (i, _, _) -> i >= index) in
-      let prev_idx, prev_term = Common.last_log_entry prev in
-      Common.make_rpc qupt (Append (prev_idx, prev_term, qupt.commit, log))
+      let last_log = Log.from ~index qupt.log in
+      let prev_idx, prev_term = match Log.last_before ~index qupt.log with
+        | Some entry -> entry.Log.index, entry.Log.term
+        | None -> 0, 0
+      in
+      Common.make_rpc qupt (Append (prev_idx, prev_term, qupt.commit, last_log))
 
     let commit_if_majority leader index =
       let matches = List.count leader.match_index ~f:(fun (_, i) -> i >= index) in
       let qupt = leader.qupt in
-      let in_log = List.exists qupt.log ~f:(fun (i, t, _) -> i = index && t = qupt.term) in
       let nodes = List.length qupt.configuration in
-      if in_log && matches >= nodes / 2 then
+      match Log.find ~index qupt.log with
+      | Some entry when entry.term = qupt.term && (matches >= nodes / 2) ->
         { leader with qupt = { qupt with commit = index } }
-      else
+      | _ ->
         leader
 
     let handle_timeout leader =
@@ -183,11 +187,12 @@ struct
       io, Leader leader
 
     let handle_command (leader:leader_state) command =
-      let index = fst (Common.last_log_entry leader.qupt.log) + 1 in
-      let log = (index, leader.qupt.term, command) :: leader.qupt.log in
-      let qupt = { leader.qupt with log } in
+      let last_index, _ = Common.last_log_entry leader.qupt.log in
+      let new_index = last_index + 1 in
+      let entry = { Log.index = new_index; term = leader.qupt.term; command = command } in
+      let qupt = { leader.qupt with log = Log.append leader.qupt.log entry } in
       let io, role = handle_timeout { leader with qupt } in
-      index, io, role
+      new_index, io, role
   end
 
   module Follower = struct
