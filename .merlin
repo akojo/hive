@@ -1,5 +1,5 @@
 FLG -short-paths
-PKG core ppx_deriving ppx_sexp_conv ounit
+PKG core ppx_deriving ppx_sexp_conv ounit sqlite3
 S .
 S src
 S test

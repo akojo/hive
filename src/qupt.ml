@@ -74,7 +74,7 @@ struct
         heartbeat;
         term = 0;
         voted = None;
-        log = Log.empty;
+        log = Log.create ();
         commit = 0;
         last_applied = 0;
       }

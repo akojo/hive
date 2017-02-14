@@ -2,9 +2,10 @@ open Core.Std
 
 include Log_intf
 
-module Make (Command: Command)
-  : Log with type command := Command.command =
+module Make (Command: Command) :
+  Log with type command = Command.command =
 struct
+  type command = Command.command
   type entry = {
     index: int;
     term: int;
@@ -12,7 +13,9 @@ struct
   } [@@deriving sexp]
   type t = entry list
 
-  let empty = []
+  let create () = []
+
+  let close _ = ()
 
   let is_empty = function
     | [] -> true

@@ -1,4 +1,9 @@
-<test.*>: package(ounit)
+<src/log_sqlite.ml>: package(sqlite3)
+
+<zoku.*>: package(sqlite3)
+
+<test.*>: package(ounit), package(sqlite3)
 <test/*>: package(ounit)
+
 "src": include
 "test": include
