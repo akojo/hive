@@ -1,3 +1,4 @@
 <test.*>: package(ounit)
 <test/*>: package(ounit)
+"src": include
 "test": include
