@@ -13,8 +13,6 @@ sig
   } [@@deriving sexp]
   type t
 
-  val create: unit -> t
-  val close: t -> unit
   val is_empty: t -> bool
   val find: t -> index:int -> entry option
   val last: t -> entry option

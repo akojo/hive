@@ -21,11 +21,8 @@ sig
   type command
   type response
   type state
-  type log_entry = {
-    index: int;
-    term: int;
-    command: command;
-  }
+  type log
+  type log_entry
 
   type vote = {
     last_idx: int;
@@ -51,7 +48,7 @@ sig
     | Response of int * response
   [@@deriving sexp]
 
-  val init: bool -> id -> id list -> state -> float -> t
+  val init: bool -> id -> id list -> state -> log -> float -> t
   val timeout: t -> float
   val handle_timeout: t -> io list * t
   val handle_rpc: t -> rpc -> io list * t

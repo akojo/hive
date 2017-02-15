@@ -47,7 +47,7 @@ let test f _ =
 
 let leader_2 =
   let open Test_qupt in
-  let qupt = init true 0 [0;1] test_state 1.0 in
+  let qupt = init true 0 [0;1] test_state (Test_log.empty) 1.0 in
   "leader (2 nodes)" >::: [
     "timeout sends heartbeat to followers" >:: test (fun _ ->
         let (io, _) = handle_timeout qupt in
@@ -91,7 +91,7 @@ let leader_2 =
 
 let leader_4 =
   let open Test_qupt in
-  let qupt = init true 0 [0;1;2;3] test_state 1.0 in
+  let qupt = init true 0 [0;1;2;3] test_state (Test_log.empty) 1.0 in
   "leader (4 nodes)" >::: [
     "client command sends append to all nodes" >:: test (fun _ ->
         let (_, io, _) = handle_command qupt 110 in
@@ -133,7 +133,7 @@ let leader_4 =
 
 let follower_2 =
   let open Test_qupt in
-  let qupt = init false 1 [0;1] test_state 1.0 in
+  let qupt = init false 1 [0;1] test_state (Test_log.empty) 1.0 in
   "follower (2 nodes)" >::: [
     "append into empty state returns success to leader" >:: test (fun _ ->
         let rpc = append [{ Test_log.index = 1; term = 0; command = 17 }] in
@@ -251,7 +251,7 @@ let follower_2 =
 
 let candidate_4 =
   let open Test_qupt in
-  let _, qupt = init false 0 [0;1;2;3] test_state 1.0 |> handle_timeout in
+  let _, qupt = init false 0 [0;1;2;3] test_state (Test_log.empty) 1.0 |> handle_timeout in
   "candidate (4 nodes)" >::: [
     "minority does not convert to leader" >:: test (fun _ ->
         let (io, _) = handle_rpc qupt (vote_granted ()) in

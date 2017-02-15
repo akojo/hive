@@ -1,8 +1,8 @@
 open Core.Std
 open OUnit2
 
-let log_tests log_module suite_name =
-  let module Test_log = (val log_module : Log_intf.Log with type command = int) in
+let log_tests (type a) log_module create_log close_log suite_name =
+  let module Test_log = (val log_module : Log_intf.Log with type command = int and type t = a) in
 
   let open Test_log in
 
@@ -18,9 +18,9 @@ let log_tests log_module suite_name =
 
   let empty_log =
     let test f _ctx =
-      let log = Test_log.create () in
+      let log = create_log () in
       let () = f log in
-      Test_log.close log
+      close_log log
     in
     "empty log" >::: [
       "tells that log is empty" >:: test (fun log ->
@@ -57,7 +57,7 @@ let log_tests log_module suite_name =
 
   let populated_log =
     let test f _ctx =
-      let log = Test_log.create () in
+      let log = create_log () in
       let log = Test_log.append_after ~index:0 log ~entries:[
           { Test_log.index = 5; term = 2; command = 40 };
           { Test_log.index = 4; term = 2; command = 30 };
@@ -66,7 +66,7 @@ let log_tests log_module suite_name =
         ]
       in
       let () = f log in
-      Test_log.close log
+      close_log log
     in
     "populated log" >::: [
       "finds an element in the log" >:: test (fun log ->
@@ -174,10 +174,21 @@ module Int_command = struct
   type command = int [@@deriving sexp]
 end
 
-let sqlite_log = (module Log_sqlite.Make(Int_command) : Log_intf.Log with type command = int)
-let in_memory_log = (module Log_memory.Make(Int_command) : Log_intf.Log with type command = int)
+module Sqlite_log = Log_sqlite.Make(Int_command)
+let sqlite_log = (module Sqlite_log : Log_intf.Log with type command = int and type t = 'a)
+let create_sqlite_log () =
+  Sqlite_log.create ()
+let close_sqlite_log log =
+  Sqlite_log.close log
+
+module Memory_log = Log_memory.Make(Int_command)
+let in_memory_log = (module Memory_log : Log_intf.Log with type command = int and type t = 'a)
+let create_memory_log () =
+  Memory_log.empty
+let close_memory_log _log =
+  ()
 
 let all = "Log" >::: [
-    log_tests sqlite_log "Sqlite3 log";
-    log_tests in_memory_log "In-memory log";
+    log_tests sqlite_log create_sqlite_log close_sqlite_log "Sqlite3 log";
+    log_tests in_memory_log create_memory_log close_memory_log "In-memory log";
   ]

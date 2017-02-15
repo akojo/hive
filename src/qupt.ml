@@ -9,6 +9,7 @@ module Make (State : State_machine) (Id: Id) (Log: sig
   : S with type state := State.t
        and type command := State.command
        and type response := State.response
+       and type log := Log.t
        and type log_entry := Log.entry
        and type id := Id.t =
 struct
@@ -66,7 +67,7 @@ struct
   [@@deriving sexp]
 
   module Common = struct
-    let init self configuration state heartbeat =
+    let init self configuration state log heartbeat =
       {
         self;
         configuration;
@@ -74,7 +75,7 @@ struct
         heartbeat;
         term = 0;
         voted = None;
-        log = Log.create ();
+        log = log;
         commit = 0;
         last_applied = 0;
       }
@@ -248,8 +249,8 @@ struct
         [], Candidate candidate
   end
 
-  let init leader self configuration state heartbeat =
-    let qupt = Common.init self configuration state heartbeat in
+  let init leader self configuration state log heartbeat =
+    let qupt = Common.init self configuration state log heartbeat in
     if leader then Leader (Leader.init qupt)
     else Follower (Follower.init qupt)
 
