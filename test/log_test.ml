@@ -1,7 +1,7 @@
 open Core.Std
 open OUnit2
 
-let log_tests (type a) log_module create_log close_log suite_name =
+let log_tests (type a) log_module setup suite_name =
   let module Test_log = (val log_module : Log_intf.Log with type command = int and type t = a) in
 
   let open Test_log in
@@ -17,11 +17,7 @@ let log_tests (type a) log_module create_log close_log suite_name =
   in
 
   let empty_log =
-    let test f _ctx =
-      let log = create_log () in
-      let () = f log in
-      close_log log
-    in
+    let test f ctx = f (setup ctx) in
     "empty log" >::: [
       "tells that log is empty" >:: test (fun log ->
           assert_equal true (is_empty log)
@@ -56,8 +52,8 @@ let log_tests (type a) log_module create_log close_log suite_name =
   in
 
   let populated_log =
-    let test f _ctx =
-      let log = create_log () in
+    let test f ctx =
+      let log = setup ctx in
       let log = Test_log.append_after ~index:0 log ~entries:[
           { Test_log.index = 5; term = 2; command = 40 };
           { Test_log.index = 4; term = 2; command = 30 };
@@ -65,8 +61,7 @@ let log_tests (type a) log_module create_log close_log suite_name =
           { Test_log.index = 1; term = 2; command = 10 };
         ]
       in
-      let () = f log in
-      close_log log
+      f log
     in
     "populated log" >::: [
       "finds an element in the log" >:: test (fun log ->
@@ -176,19 +171,15 @@ end
 
 module Sqlite_log = Log_sqlite.Make(Int_command)
 let sqlite_log = (module Sqlite_log : Log_intf.Log with type command = int and type t = 'a)
-let create_sqlite_log () =
-  Sqlite_log.create ()
-let close_sqlite_log log =
-  Sqlite_log.close log
+let setup_sqlite ctx =
+  let filename, _ = bracket_tmpfile ~prefix:"log_test" ctx in
+  bracket (fun _ctx -> Sqlite_log.create filename) (fun log _ctx -> Sqlite_log.close log) ctx
 
 module Memory_log = Log_memory.Make(Int_command)
 let in_memory_log = (module Memory_log : Log_intf.Log with type command = int and type t = 'a)
-let create_memory_log () =
-  Memory_log.empty
-let close_memory_log _log =
-  ()
+let setup_memory _ctx = Memory_log.empty
 
 let all = "Log" >::: [
-    log_tests sqlite_log create_sqlite_log close_sqlite_log "Sqlite3 log";
-    log_tests in_memory_log create_memory_log close_memory_log "In-memory log";
+    log_tests sqlite_log setup_sqlite "Sqlite3 log";
+    log_tests in_memory_log setup_memory "In-memory log";
   ]

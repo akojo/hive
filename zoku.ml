@@ -23,7 +23,7 @@ module Key_value_store = struct
       { key; value = Map.find store key }, store
 end
 
-module Log = Log_memory.Make(Key_value_store)
+module Log = Log_sqlite.Make(Key_value_store)
 
 module Zoku = Qupt.Make(Key_value_store)(String)(Log)
 
@@ -139,7 +139,8 @@ let run zoku_port client_port leader bind_to name heartbeat configuration () =
   let client_fd = bind_socket bind_addr client_port in
   let cluster = read_configuration (myname, bind_addr, zoku_port) configuration in
   let ids = Map.keys cluster in
-  let qupt = Zoku.init leader myname ids Key_value_store.empty heartbeat in
+  let log = Log.create "zoku.db" in
+  let qupt = Zoku.init leader myname ids Key_value_store.empty log heartbeat in
   loop { zoku_fd; client_fd; qupt; cluster; pending = [] }
 
 let () = Command.run
