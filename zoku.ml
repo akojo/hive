@@ -50,20 +50,21 @@ let read_configuration localhost ext_config =
   cluster
 
 let do_io state messages =
-  let cluster = state.cluster in
-  List.iter messages ~f:(fun message ->
-      match message with
-      | Zoku.Rpc (id, rpc) ->
-        let addr = Map.find_exn cluster id in
-        let buf = Zoku.sexp_of_rpc rpc |> Sexp.to_string_hum in
-        ignore Unix.(sendto state.zoku_fd ~buf ~pos:0 ~len:(String.length buf) ~mode:[] ~addr)
-      | Zoku.Response (id, response) ->
-        (match List.Assoc.find state.pending id with
-         | Some addr ->
-           let buf = Key_value_store.sexp_of_response response |> Sexp.to_string_hum in
-           ignore Unix.(sendto state.client_fd ~buf ~pos:0 ~len:(String.length buf) ~mode:[] ~addr)
-         | None -> ()
-        )
+  let send_rpc id rpc =
+    let addr = Map.find_exn state.cluster id in
+    let buf = Zoku.sexp_of_rpc rpc |> Sexp.to_string_hum in
+    ignore Unix.(sendto state.zoku_fd ~buf ~pos:0 ~len:(String.length buf) ~mode:[] ~addr)
+  in
+  let send_response id response =
+    match List.Assoc.find state.pending id with
+    | Some addr ->
+      let buf = Key_value_store.sexp_of_response response |> Sexp.to_string_hum in
+      ignore Unix.(sendto state.client_fd ~buf ~pos:0 ~len:(String.length buf) ~mode:[] ~addr)
+    | None -> ()
+  in
+  List.iter messages ~f:(function
+      | Zoku.Rpc (id, rpc) -> send_rpc id rpc
+      | Zoku.Response (id, response) -> send_response id response
     )
 
 let handle_timeout state =
