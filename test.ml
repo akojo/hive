@@ -5,6 +5,7 @@ let () =
   let tests = test_list [
       Qupt_test.all;
       Log_test.all;
+      Key_value_store_test.all;
     ]
   in
   run_test_tt_main tests

@@ -1,28 +1,5 @@
 open Core.Std
 
-module Key_value_store = struct
-  type t = string String.Map.t
-
-  type command =
-    | Set of string * string
-    | Get of string
-  [@@deriving sexp]
-
-  type response = {
-    key: string;
-    value: string option
-  } [@@deriving sexp]
-
-  let empty = String.Map.empty
-
-  let apply store command =
-    match command with
-    | Set (key, value) ->
-      { key; value = Some value }, Map.add ~key ~data:value store
-    | (Get key) ->
-      { key; value = Map.find store key }, store
-end
-
 module Log = Log_sqlite.Make(Key_value_store)
 
 module Zoku = Qupt.Make(Key_value_store)(String)(Log)
