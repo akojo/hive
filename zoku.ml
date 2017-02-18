@@ -72,15 +72,8 @@ let handle_timeout state =
   let () = do_io state messages in
   { state with qupt }
 
-let run zoku_port client_port leader bind_to name heartbeat configuration () =
-  let bind_addr = match bind_to with
-    | Some addr -> Unix.Inet_addr.of_string addr
-    | None -> Unix.Inet_addr.bind_any
-  in
-  let myname = match name with
-    | Some name -> name
-    | None -> Unix.gethostname ()
-  in
+let run zoku_port client_port leader bind_to myname heartbeat configuration () =
+  let bind_addr = Unix.Inet_addr.of_string bind_to in
   let buf = String.create 65536 in
   let handle_read state fd =
     let (len, addr) = Unix.recvfrom fd ~buf:buf ~pos:0 ~len:65536 ~mode:[] in
@@ -129,8 +122,8 @@ let () = Command.run
          +> flag "-P" (optional_with_default 7383 int) ~doc:"port zoku port (default 7383)"
          +> flag "-p" (optional_with_default 2360 int) ~doc:"port client port (default 2360)"
          +> flag "-L" no_arg ~doc:" start as a leader"
-         +> flag "-b" (optional string) ~doc:"address ip addres to bind to (default 0.0.0.0)"
-         +> flag "-n" (optional string) ~doc:"name node name (default hostname)"
+         +> flag "-b" (optional_with_default "0.0.0.0" string) ~doc:"address ip addres to bind to (default 0.0.0.0)"
+         +> flag "-n" (optional_with_default (Unix.gethostname ()) string) ~doc:"name node name (default hostname)"
          +> flag "-t" (optional_with_default 100.0 float) ~doc:"milliseconds heartbeat interval (default 100 ms)"
          +> flag "-c" (optional string) ~doc:"configuration configuration"
        )
