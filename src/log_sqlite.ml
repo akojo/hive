@@ -13,138 +13,122 @@ struct
 
   type t = Sqlite3.db
 
-  let failure db rc =
-    let code = Sqlite3.Rc.to_string rc in
-    let message = Sqlite3.errmsg db in
-    failwith (code ^ ": " ^ message)
+  let failure db rc = failwith Sqlite3.((Rc.to_string rc) ^ ": " ^ (errmsg db))
 
-  let check db expected rc =
-    if rc <> expected then
-      failure db rc
-
-  let create filename =
-    let open Sqlite3 in
-    let db = db_open filename in
-    let () = exec db
-        "CREATE TABLE IF NOT EXISTS log ( \
-         idx INTEGER PRIMARY KEY, \
-         term INTEGER NOT NULL, \
-         command TEXT NOT NULL)" |> check db Sqlite3.Rc.OK in
-    db
-
-  let close db = assert (Sqlite3.db_close db)
+  let check db expected rc = if rc <> expected then failure db rc
 
   let to_int = function
     | Sqlite3.Data.INT value -> Int64.to_int_exn value
     | col -> failwith ("to_int: " ^ Sqlite3.Data.to_string_debug col)
 
-  let read_entry stmt =
-    let to_command = function
-      | Sqlite3.Data.TEXT value ->
-        value |> Sexp.of_string |> Command.command_of_sexp
-      | col -> failwith ("to_command: " ^ Sqlite3.Data.to_string_debug col)
+  let to_string = function
+    | Sqlite3.Data.TEXT value -> value
+    | col -> failwith ("to_string: " ^ Sqlite3.Data.to_string_debug col)
+
+  let get_int index stmt = Sqlite3.column stmt index |> to_int
+
+  let get_string index stmt = Sqlite3.column stmt index |> to_string
+
+  let of_int i = (Sqlite3.Data.INT (Int64.of_int i))
+
+  let of_string str = Sqlite3.Data.TEXT str
+
+  let query ~mapper ?(params = []) ~sql db =
+    let rec bind_params stmt index = function
+      | param :: rest ->
+        let () = Sqlite3.bind stmt index param |> check db Sqlite3.Rc.OK in
+        bind_params stmt (index + 1) rest
+      | [] -> stmt
     in
-    {
-      index = Sqlite3.column stmt 0 |> to_int;
-      term = Sqlite3.column stmt 1 |> to_int;
-      command = Sqlite3.column stmt 2 |> to_command
-    }
-
-  let bind_int index value stmt =
-    let _ = Sqlite3.(bind stmt index (Data.INT (Int64.of_int value))) in
-    stmt
-
-  let bind_command index command stmt =
-    let command_string = command |> Command.sexp_of_command |> Sexp.to_string in
-    let _ = Sqlite3.(bind stmt index (Data.TEXT command_string)) in
-    stmt
-
-  let bind_entry entry stmt =
-    bind_int 1 entry.index stmt
-    |> bind_int 2 entry.term
-    |> bind_command 3 entry.command
-
-  let read_rows stmt db f =
-    let rec loop res =
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.ROW -> loop (f stmt :: res)
-      | Sqlite3.Rc.DONE -> res
-      | rc -> failure db rc
+    let read_rows mapper stmt =
+      let rec loop res =
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> loop (mapper stmt :: res)
+        | Sqlite3.Rc.DONE -> res
+        | rc -> failure db rc
+      in
+      loop []
     in
-    let result = loop [] in
+    let stmt = Sqlite3.prepare db sql in
+    let result = bind_params stmt 1 params |> read_rows mapper in
     let () = Sqlite3.finalize stmt |> check db Sqlite3.Rc.OK in
     result
 
-  let read_row stmt db f =
-    match read_rows stmt db f with
+  let query_one ~mapper ?(params = []) ~sql db=
+    match query ~mapper ~params ~sql db with
     | result :: [] -> result
-    | _ -> failwith "read_row"
+    | _ -> failwith "query_one"
+
+  let update ?(params = []) ~sql db =
+    match query ~mapper:ident ~params ~sql db with
+    | [] -> db
+    | _ -> failwith "update"
+
+  let of_entry entry =
+    [
+      of_int entry.index;
+      of_int entry.term;
+      Command.sexp_of_command entry.command |> Sexp.to_string |> of_string
+    ]
+
+  let read_entry stmt =
+    {
+      index = get_int 0 stmt;
+      term = get_int 1 stmt;
+      command = get_string 2 stmt |> Sexp.of_string |> Command.command_of_sexp
+    }
+
+  let create filename =
+    Sqlite3.db_open filename |> update
+      ~sql:"CREATE TABLE IF NOT EXISTS log ( \
+            idx INTEGER PRIMARY KEY, \
+            term INTEGER NOT NULL, \
+            command TEXT NOT NULL)"
+
+  let close db = assert (Sqlite3.db_close db)
 
   let is_empty db =
-    let query = "SELECT COUNT(*) FROM log" in
-    let stmt = Sqlite3.prepare db query in
-    read_row stmt db (fun stmt -> Sqlite3.column stmt 0 |> to_int) = 0
-
-  let find_one db stmt =
-    match read_rows stmt db (fun stmt -> read_entry stmt) with
-    | result :: [] -> Some result
-    | [] -> None
-    | _ -> failwith "find_one"
+    (query_one db ~sql:"SELECT COUNT(*) FROM log" ~mapper:(get_int 0)) = 0
 
   let find db ~index =
-    let query = "SELECT idx, term, command FROM log WHERE idx = ?" in
-    Sqlite3.prepare db query |> bind_int 1 index |> find_one db
-
-  let read_entries db stmt =
-    read_rows stmt db read_entry
+    query db ~sql:"SELECT idx, term, command FROM log WHERE idx = ?"
+      ~mapper:read_entry ~params:[of_int index] |> List.hd
 
   let from db ~index =
-    let query =
-      "SELECT idx, term, command \
-       FROM log \
-       WHERE idx >= ? \
-       ORDER BY idx ASC" in
-    let stmt = Sqlite3.prepare db query |> bind_int 1 index in
-    read_entries db stmt
+    query db ~mapper:read_entry ~params:[of_int index]
+      ~sql:"SELECT idx, term, command \
+            FROM log \
+            WHERE idx >= ? \
+            ORDER BY idx ASC"
 
   let range db ~first ~last =
-    let query =
-      "SELECT idx, term, command \
-       FROM log \
-       WHERE idx > ? AND idx <= ? \
-       ORDER BY idx ASC" in
-    let stmt = Sqlite3.prepare db query
-               |> bind_int 1 first |> bind_int 2 last in
-    read_entries db stmt
+    query db ~mapper:read_entry ~params:[of_int first; of_int last]
+      ~sql:"SELECT idx, term, command \
+            FROM log \
+            WHERE idx > ? AND idx <= ? \
+            ORDER BY idx ASC"
 
   let append db entry =
-    let stmt = Sqlite3.prepare db "INSERT INTO log VALUES (?, ?, ?)"
-               |> bind_entry entry
-    in
-    match read_rows stmt db ident with
-    | [] -> db
-    | _ -> failwith "append"
+    update db ~params:(of_entry entry) ~sql:"INSERT INTO log VALUES (?, ?, ?)"
 
   let append_after db ~index ~entries =
-    let stmt = Sqlite3.prepare db "DELETE FROM log WHERE idx > ?" |> bind_int 1 index in
-    let () = Sqlite3.step stmt |> check db Sqlite3.Rc.DONE in
-    let () = Sqlite3.finalize stmt |> check db Sqlite3.Rc.OK in
+    let db = update db ~params:[of_int index] ~sql:"DELETE FROM log WHERE idx > ?" in
     List.fold_left entries ~init:db ~f:(fun db entry -> append db entry)
 
   let last db =
-    let query =
+    let sql =
       "SELECT idx, term, command \
        FROM log \
        ORDER BY idx DESC \
        LIMIT 1" in
-    Sqlite3.prepare db query |> find_one db
+    query db ~sql ~mapper:read_entry |> List.hd
 
   let last_before db ~index =
-    let query =
+    let sql =
       "SELECT idx, term, command \
        FROM log \
        WHERE idx < ? \
        ORDER BY idx DESC \
        LIMIT 1" in
-    Sqlite3.prepare db query |> bind_int 1 index |> find_one db
+    query db ~sql ~mapper:read_entry ~params:[of_int index] |> List.hd
 end
