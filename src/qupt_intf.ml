@@ -29,10 +29,22 @@ sig
     last_term: int;
   } [@@deriving sexp]
 
+  type append = {
+    prev_idx: int;
+    prev_term: int;
+    commit: int;
+    entries: log_entry list
+  } [@@deriving sexp]
+
+  type append_response = {
+    success: bool;
+    index: int;
+  } [@@deriving sexp]
+
   type message =
     (* previous index, previous term, commit, log *)
-    | Append of int * int * int * log_entry list
-    | AppendResponse of bool * int
+    | Append of append
+    | AppendResponse of append_response
     | Vote of vote
     | VoteGranted
   [@@deriving sexp]

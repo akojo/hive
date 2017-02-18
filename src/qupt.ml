@@ -48,9 +48,22 @@ struct
     last_term: int;
   } [@@deriving sexp]
 
+  type append = {
+    prev_idx: int;
+    prev_term: int;
+    commit: int;
+    entries: Log.entry list
+  } [@@deriving sexp]
+
+  type append_response = {
+    success: bool;
+    index: int;
+  } [@@deriving sexp]
+
   type message =
-    | Append of int * int * int * Log.entry list
-    | AppendResponse of bool * int
+    (* previous index, previous term, commit, log *)
+    | Append of append
+    | AppendResponse of append_response
     | Vote of vote
     | VoteGranted
   [@@deriving sexp]
@@ -59,7 +72,8 @@ struct
     sender: Id.t;
     term: int;
     message: message
-  } [@@deriving sexp]
+  }
+  [@@deriving sexp]
 
   type io =
     | Rpc of Id.t * rpc
@@ -108,16 +122,16 @@ struct
         let log = Log.append_after ~index:prev_idx ~entries:log qupt.log in
         let last_index, _ = last_log_entry log in
         let qupt = { qupt with log; commit = min last_index commit } in
-        AppendResponse (true, last_index), qupt
+        AppendResponse { success = true; index = last_index}, qupt
       in
       if rpc.term < qupt.term then
-        [Rpc (rpc.sender, make_rpc qupt (AppendResponse (false, 0)))], qupt
+        [Rpc (rpc.sender, make_rpc qupt (AppendResponse { success = false; index = 0 }))], qupt
       else
         let message, qupt =
           match Log.find ~index:prev_idx qupt.log with
           | Some entry when entry.term = prev_term -> append qupt log
           | None when Log.is_empty qupt.log -> append qupt log
-          | _ -> AppendResponse (false, qupt.commit), qupt
+          | _ -> AppendResponse { success = false; index = qupt.commit} , qupt
         in
         let io, qupt = apply_committed qupt in
         Rpc (rpc.sender, make_rpc qupt message) :: io, qupt
@@ -149,7 +163,12 @@ struct
         | Some entry -> entry.Log.index, entry.Log.term
         | None -> 0, 0
       in
-      Common.make_rpc qupt (Append (prev_idx, prev_term, qupt.commit, last_log))
+      Common.make_rpc qupt (Append {
+          prev_idx;
+          prev_term;
+          commit = qupt.commit;
+          entries = last_log
+        })
 
     let commit_if_majority leader index =
       let matches = List.count leader.match_index ~f:(fun (_, i) -> i >= index) in
@@ -170,7 +189,7 @@ struct
 
     let handle_rpc leader rpc =
       let io, leader = match rpc.message with
-        | AppendResponse (success, index) ->
+        | AppendResponse { success; index } ->
           let next_index = List.Assoc.add leader.next_index rpc.sender (index + 1) in
           let match_index = List.Assoc.add leader.match_index rpc.sender index in
           let leader = { leader with match_index; next_index } in
@@ -215,8 +234,8 @@ struct
 
     let handle_rpc (qupt:qupt) rpc =
       let io, qupt = match rpc.message with
-        | Append (prev_idx, prev_term, commit, log) ->
-          Common.handle_append qupt rpc prev_idx prev_term commit log
+        | Append { prev_idx; prev_term; commit; entries }  ->
+          Common.handle_append qupt rpc prev_idx prev_term commit entries
         | Vote vote ->
           handle_vote qupt rpc vote
         | AppendResponse _
@@ -229,8 +248,8 @@ struct
   module Candidate = struct
     let handle_rpc candidate rpc =
       match rpc.message with
-      | Append (prev_idx, prev_term, commit, log) ->
-        let io, qupt = Common.handle_append candidate.qupt rpc prev_idx prev_term commit log in
+      | Append { prev_idx; prev_term; commit; entries } ->
+        let io, qupt = Common.handle_append candidate.qupt rpc prev_idx prev_term commit entries in
         io, Follower qupt
       | VoteGranted ->
         let candidate = if List.mem candidate.votes rpc.sender then
