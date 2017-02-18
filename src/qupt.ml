@@ -117,21 +117,23 @@ struct
       in
       io, { qupt with state; last_applied = qupt.commit }
 
-    let handle_append (qupt:qupt) rpc prev_idx prev_term commit log =
-      let append qupt log =
-        let log = Log.append_after ~index:prev_idx ~entries:log qupt.log in
+    let handle_append (qupt:qupt) rpc append =
+      let append_entries qupt entries =
+        let log = Log.append_after ~index:append.prev_idx ~entries qupt.log in
         let last_index, _ = last_log_entry log in
-        let qupt = { qupt with log; commit = min last_index commit } in
+        let qupt = { qupt with log; commit = min last_index append.commit } in
         AppendResponse { success = true; index = last_index}, qupt
       in
       if rpc.term < qupt.term then
         [Rpc (rpc.sender, make_rpc qupt (AppendResponse { success = false; index = 0 }))], qupt
       else
         let message, qupt =
-          match Log.find ~index:prev_idx qupt.log with
-          | Some entry when entry.term = prev_term -> append qupt log
-          | None when Log.is_empty qupt.log -> append qupt log
-          | _ -> AppendResponse { success = false; index = qupt.commit} , qupt
+          match Log.find ~index:append.prev_idx qupt.log with
+          | Some entry when entry.Log.term = append.prev_term ->
+            append_entries qupt append.entries
+          | None when Log.is_empty qupt.log ->
+            append_entries qupt append.entries
+          | _ -> AppendResponse { success = false; index = qupt.commit }, qupt
         in
         let io, qupt = apply_committed qupt in
         Rpc (rpc.sender, make_rpc qupt message) :: io, qupt
@@ -187,22 +189,23 @@ struct
       in
       io, Leader leader
 
+    let handle_append leader rpc append =
+      let next_index = List.Assoc.add leader.next_index rpc.sender (append.index + 1) in
+      let match_index = List.Assoc.add leader.match_index rpc.sender append.index in
+      let leader = { leader with match_index; next_index } in
+      if append.success then
+        let leader = commit_if_majority leader append.index in
+        let io, qupt = Common.apply_committed leader.qupt in
+        io, { leader with qupt }
+      else
+        [Rpc (rpc.sender, send_append leader.qupt (append.index + 1))], leader
+
     let handle_rpc leader rpc =
       let io, leader = match rpc.message with
-        | AppendResponse { success; index } ->
-          let next_index = List.Assoc.add leader.next_index rpc.sender (index + 1) in
-          let match_index = List.Assoc.add leader.match_index rpc.sender index in
-          let leader = { leader with match_index; next_index } in
-          if success then
-            let leader = commit_if_majority leader index in
-            let io, qupt = Common.apply_committed leader.qupt in
-            io, { leader with qupt }
-          else
-            [Rpc (rpc.sender, send_append leader.qupt (index + 1))], leader
+        | AppendResponse append -> handle_append leader rpc append
         | Vote _
         | Append _
-        | VoteGranted ->
-          [], leader
+        | VoteGranted -> [], leader
       in
       io, Leader leader
 
@@ -234,24 +237,16 @@ struct
 
     let handle_rpc (qupt:qupt) rpc =
       let io, qupt = match rpc.message with
-        | Append { prev_idx; prev_term; commit; entries }  ->
-          Common.handle_append qupt rpc prev_idx prev_term commit entries
-        | Vote vote ->
-          handle_vote qupt rpc vote
+        | Append append -> Common.handle_append qupt rpc append
+        | Vote vote -> handle_vote qupt rpc vote
         | AppendResponse _
-        | VoteGranted ->
-          [], qupt
+        | VoteGranted -> [], qupt
       in
       io, Follower qupt
   end
 
   module Candidate = struct
-    let handle_rpc candidate rpc =
-      match rpc.message with
-      | Append { prev_idx; prev_term; commit; entries } ->
-        let io, qupt = Common.handle_append candidate.qupt rpc prev_idx prev_term commit entries in
-        io, Follower qupt
-      | VoteGranted ->
+    let handle_vote_granted candidate rpc =
         let candidate = if List.mem candidate.votes rpc.sender then
             candidate
           else
@@ -263,9 +258,15 @@ struct
           Leader.handle_timeout (Leader.init candidate.qupt)
         else
           [], Candidate candidate
+
+    let handle_rpc candidate rpc =
+      match rpc.message with
+      | Append append ->
+        let io, qupt = Common.handle_append candidate.qupt rpc append in
+        io, Follower qupt
+      | VoteGranted -> handle_vote_granted candidate rpc
       | Vote _
-      | AppendResponse _ ->
-        [], Candidate candidate
+      | AppendResponse _ -> [], Candidate candidate
   end
 
   let init leader self configuration state log heartbeat =
