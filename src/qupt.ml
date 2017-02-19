@@ -1,17 +1,45 @@
 open Core.Std
 
-include Qupt_intf
-include Log_intf
+module type State_machine =
+sig
+  type t
+  type command [@@deriving sexp]
+  type response [@@deriving sexp]
 
-module Make (State : State_machine) (Id: Id) (Log: sig
-    include Log_intf.Log with type command := State.command
-  end)
-  : S with type state := State.t
-       and type command := State.command
-       and type response := State.response
-       and type log := Log.t
-       and type log_entry := Log.entry
-       and type id := Id.t =
+  val apply: t -> command -> response * t
+end
+
+module type Id =
+sig
+  type t [@@deriving sexp]
+end
+
+module type Log =
+sig
+  type command
+  type entry = {
+    index: int;
+    term: int;
+    command: command;
+  } [@@deriving sexp]
+  type t
+
+  val is_empty: t -> bool
+  val find: t -> index:int -> entry option
+  val last: t -> entry option
+  val last_before: t -> index:int -> entry option
+  val from: t -> index:int -> entry list
+  val range: t -> first:int -> last:int -> entry list
+  val append: t -> entry -> t
+  val append_after: t -> index:int -> entries:entry list -> t
+end
+
+module Make
+    (State : State_machine)
+    (Id: Id)
+    (Log: sig
+       include Log with type command := State.command
+     end) =
 struct
   type qupt = {
     self: Id.t;
@@ -247,17 +275,17 @@ struct
 
   module Candidate = struct
     let handle_vote_granted candidate rpc =
-        let candidate = if List.mem candidate.votes rpc.sender then
-            candidate
-          else
-            { candidate with votes = rpc.sender :: candidate.votes }
-        in
-        let votes = List.length candidate.votes in
-        let nodes = List.length candidate.qupt.configuration in
-        if votes >= nodes / 2 then
-          Leader.handle_timeout (Leader.init candidate.qupt)
+      let candidate = if List.mem candidate.votes rpc.sender then
+          candidate
         else
-          [], Candidate candidate
+          { candidate with votes = rpc.sender :: candidate.votes }
+      in
+      let votes = List.length candidate.votes in
+      let nodes = List.length candidate.qupt.configuration in
+      if votes >= nodes / 2 then
+        Leader.handle_timeout (Leader.init candidate.qupt)
+      else
+        [], Candidate candidate
 
     let handle_rpc candidate rpc =
       match rpc.message with

@@ -1,8 +1,6 @@
 open Core.Std
 
-include Log_intf
-
-module Make (Command: Command) =
+module Make (Command: Log_intf.Command) =
 struct
   type command = Command.command
   type entry = {

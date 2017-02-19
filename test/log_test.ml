@@ -2,7 +2,7 @@ open Core.Std
 open OUnit2
 
 let log_tests (type a) log_module setup suite_name =
-  let module Test_log = (val log_module : Log_intf.Log with type command = int and type t = a) in
+  let module Test_log = (val log_module : Qupt.Log with type command = int and type t = a) in
 
   let open Test_log in
 
@@ -170,13 +170,13 @@ module Int_command = struct
 end
 
 module Sqlite_log = Log_sqlite.Make(Int_command)
-let sqlite_log = (module Sqlite_log : Log_intf.Log with type command = int and type t = 'a)
+let sqlite_log = (module Sqlite_log : Qupt.Log with type command = int and type t = 'a)
 let setup_sqlite ctx =
   let filename, _ = bracket_tmpfile ~prefix:"log_test" ctx in
   bracket (fun _ctx -> Sqlite_log.create filename) (fun log _ctx -> Sqlite_log.close log) ctx
 
 module Memory_log = Log_memory.Make(Int_command)
-let in_memory_log = (module Memory_log : Log_intf.Log with type command = int and type t = 'a)
+let in_memory_log = (module Memory_log : Qupt.Log with type command = int and type t = 'a)
 let setup_memory _ctx = Memory_log.empty
 
 let all = "Log" >::: [
